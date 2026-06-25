@@ -1,0 +1,19 @@
+services:
+  linear-dashboard:
+    build:
+      context: .
+    image: linear-dashboard:latest
+    ports:
+      - "8501:8501"
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /app/keys/dwh-key.json
+      LINEAR_BQ_PROJECT: ${LINEAR_BQ_PROJECT:-}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-fanme-data-warehouse}
+      LINEAR_BQ_DATASET: ${LINEAR_BQ_DATASET:-linear_dwh}
+      LINEAR_CURRENT_TABLE: ${LINEAR_CURRENT_TABLE:-linear_project_issues_current}
+      LINEAR_SNAPSHOT_TABLE: ${LINEAR_SNAPSHOT_TABLE:-linear_project_issues_snapshot_hourly}
+      BQ_LOCATION: ${BQ_LOCATION:-asia-southeast1}
+    volumes:
+      - ./keys:/app/keys:ro
+      - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro
+    restart: unless-stopped
