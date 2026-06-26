@@ -23,9 +23,12 @@ from lib.ui import (
     card,
     format_int,
     format_progress,
+    good_ratio_tone,
     num,
     page_header,
     progress_points,
+    ratio_label,
+    safe_ratio,
     section_header,
     setup_page,
     state_bar,
@@ -98,6 +101,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
     due_soon = int_value(row, "due_soon_issues")
     high_priority = int_value(row, "high_priority_open_issues")
     completion = completion_ratio(row)
+    operating_ratio = safe_ratio(int_value(row, "open_issues") - overdue, row["open_issues"])
 
     if overdue or risky_projects:
         operating_status = "Needs attention"
@@ -118,13 +122,20 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
     )
     cols = st.columns([1.25, 1, 1, 1, 1])
     with cols[0]:
-        card("Operating status", operating_status, status_note, status_tone)
+        card(
+            "Operating ratio",
+            ratio_label(operating_ratio),
+            operating_status,
+            status_tone if status_tone == "danger" else good_ratio_tone(operating_ratio),
+            "Open not overdue / open.",
+        )
     with cols[1]:
         card(
             "Open work",
             format_int(row["open_issues"]),
             signed(trend_delta(trend, "open_issues")),
             "info",
+            "Open = triage + backlog + unstarted + started.",
         )
     with cols[2]:
         card(
@@ -132,6 +143,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             format_progress(completion),
             signed(trend_delta(trend, "issue_completion_ratio"), "%"),
             completion_tone(completion),
+            "Completed / (total - canceled).",
         )
     with cols[3]:
         card(
@@ -139,6 +151,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             format_int(overdue),
             f"{format_int(due_soon)} due in 7 days",
             risk_tone(overdue),
+            "Open issue có due date trước hôm nay.",
         )
     with cols[4]:
         card(
@@ -146,17 +159,38 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             format_int(risky_projects),
             f"{format_int(high_priority)} high priority, {format_int(stale)} stale",
             risk_tone(risky_projects),
+            "Project health at risk/off track.",
         )
 
     a, b, c, d = st.columns(4)
     with a:
-        alert_tile("Unassigned open", format_int(unassigned), watch_tone(unassigned))
+        alert_tile(
+            "Unassigned open",
+            format_int(unassigned),
+            watch_tone(unassigned),
+            "Open issue chưa có assignee.",
+        )
     with b:
-        alert_tile("Stale open", format_int(stale), watch_tone(stale))
+        alert_tile(
+            "Stale open",
+            format_int(stale),
+            watch_tone(stale),
+            "Open issue hơn 14 ngày chưa update.",
+        )
     with c:
-        alert_tile("In progress", format_int(row["in_progress_issues"]), "info")
+        alert_tile(
+            "In progress",
+            format_int(row["in_progress_issues"]),
+            "info",
+            "Issue ở state started.",
+        )
     with d:
-        alert_tile("Avg Linear progress", format_progress(row["avg_project_progress"]), "good")
+        alert_tile(
+            "Avg Linear progress",
+            format_progress(row["avg_project_progress"]),
+            "good",
+            "Trung bình project_progress từ Linear.",
+        )
 
 
 def render_snapshot_trend(trend: pd.DataFrame, snapshot_table: str) -> None:

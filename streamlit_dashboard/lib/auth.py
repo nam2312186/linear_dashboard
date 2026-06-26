@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import base64
+import json
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import streamlit as st
 
 
 AUTH_PROVIDER = "logto"
+LOGO_PATH = Path(__file__).resolve().parents[1] / "assets" / "logo.png"
 REQUIRED_AUTH_KEYS = {
     "redirect_uri",
     "cookie_secret",
@@ -13,6 +18,74 @@ REQUIRED_AUTH_KEYS = {
     "client_secret",
     "server_metadata_url",
 }
+
+
+def _post_logout_redirect_uri(redirect_uri: str) -> str:
+    parsed = urlsplit(redirect_uri)
+    path = parsed.path
+    if path.endswith("/oauth2callback"):
+        path = path[: -len("oauth2callback")]
+    elif path.endswith("oauth2callback"):
+        path = path[: -len("oauth2callback")]
+
+    if not path.endswith("/"):
+        path = f"{path}/"
+
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def patch_streamlit_logout_redirect() -> None:
+    from streamlit.auth_util import build_logout_url, get_validated_redirect_uri
+    from streamlit.web.server.starlette import starlette_auth_routes as auth_routes
+    from streamlit.web.server.starlette.starlette_server_config import (
+        TOKENS_COOKIE_NAME,
+        USER_COOKIE_NAME,
+    )
+
+    if getattr(auth_routes, "_fanme_logout_redirect_patch", False):
+        return
+
+    async def fanme_provider_logout_url(request):
+        cookie_value = auth_routes._get_cookie_value_from_request(request, USER_COOKIE_NAME)
+        if not cookie_value:
+            return None
+
+        try:
+            user_info = json.loads(cookie_value)
+            provider = user_info.get("provider")
+            if not provider:
+                return None
+
+            client, _ = auth_routes._create_oauth_client(provider)
+            metadata = await client.load_server_metadata()
+            end_session_endpoint = metadata.get("end_session_endpoint")
+            if not end_session_endpoint:
+                return None
+
+            redirect_uri = get_validated_redirect_uri()
+            if redirect_uri is None:
+                return None
+
+            id_token = None
+            tokens_cookie_value = auth_routes._get_cookie_value_from_request(
+                request,
+                TOKENS_COOKIE_NAME,
+            )
+            if tokens_cookie_value:
+                tokens = json.loads(tokens_cookie_value)
+                id_token = tokens.get("id_token")
+
+            return build_logout_url(
+                end_session_endpoint=end_session_endpoint,
+                client_id=client.client_id,
+                post_logout_redirect_uri=_post_logout_redirect_uri(redirect_uri),
+                id_token=id_token,
+            )
+        except Exception:
+            return None
+
+    auth_routes._get_provider_logout_url = fanme_provider_logout_url
+    auth_routes._fanme_logout_redirect_patch = True
 
 
 def _auth_secrets() -> dict[str, Any]:
@@ -47,6 +120,11 @@ def _user_label() -> str:
         or user.get("sub")
         or "Authenticated user"
     )
+
+
+def logo_data_uri() -> str:
+    encoded = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def render_login_page() -> None:
@@ -93,18 +171,12 @@ def render_login_page() -> None:
         }
 
         .fanme-auth-logo {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 46px;
-            height: 46px;
-            margin-bottom: 18px;
-            border-radius: 12px;
-            color: #ffffff;
-            background: linear-gradient(135deg, #2563eb, #0f766e);
-            font-weight: 800;
-            font-size: 1.05rem;
-            letter-spacing: 0;
+            display: block;
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 20px;
+            border-radius: 18px;
+            box-shadow: 0 14px 30px rgba(37, 99, 235, 0.24);
         }
 
         .fanme-auth-title {
@@ -163,10 +235,11 @@ def render_login_page() -> None:
         """,
         unsafe_allow_html=True,
     )
+    logo_src = logo_data_uri()
     st.markdown(
-        """
+        f"""
         <div class="fanme-auth-card">
-            <div class="fanme-auth-logo">F</div>
+            <img class="fanme-auth-logo" src="{logo_src}" alt="Fanme logo" />
             <h1 class="fanme-auth-title">Fanme Linear Operations</h1>
             <div class="fanme-auth-subtitle">Secure internal dashboard</div>
             <div class="fanme-auth-description">
@@ -186,6 +259,8 @@ def render_login_page() -> None:
 
 
 def require_login() -> None:
+    patch_streamlit_logout_redirect()
+
     missing = missing_auth_keys()
     if missing:
         st.error(

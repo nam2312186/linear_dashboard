@@ -4,8 +4,74 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.queries import load_issue_queue, load_raw_issues
-from lib.ui import page_header, section_header, setup_page
+from lib.queries import load_issue_queue, load_kpis, load_raw_issues
+from lib.ui import (
+    card,
+    format_int,
+    good_ratio_tone,
+    page_header,
+    pressure_tone,
+    ratio_label,
+    safe_ratio,
+    section_header,
+    setup_page,
+)
+
+
+def render_issue_kpis(kpis) -> None:
+    if kpis.empty:
+        return
+
+    row = kpis.iloc[0]
+    open_issues = int(row["open_issues"] or 0)
+    overdue = int(row["overdue_issues"] or 0)
+    due_soon = int(row["due_soon_issues"] or 0)
+    stale = int(row["stale_open_issues"] or 0)
+    high_priority = int(row["high_priority_open_issues"] or 0)
+    unassigned = int(row["unassigned_open_issues"] or 0)
+    on_time_ratio = safe_ratio(open_issues - overdue, open_issues)
+
+    cols = st.columns(5)
+    with cols[0]:
+        card(
+            "Operating ratio",
+            ratio_label(on_time_ratio),
+            f"{format_int(overdue)} overdue",
+            good_ratio_tone(on_time_ratio),
+            "Open not overdue / open.",
+        )
+    with cols[1]:
+        card(
+            "Open issues",
+            format_int(open_issues),
+            f"{format_int(unassigned)} unassigned",
+            "info",
+            "Open = triage + backlog + unstarted + started.",
+        )
+    with cols[2]:
+        card(
+            "Due soon",
+            format_int(due_soon),
+            "Next 7 days",
+            pressure_tone(due_soon),
+            "Open issue due today through next 7 days.",
+        )
+    with cols[3]:
+        card(
+            "Stale",
+            format_int(stale),
+            ">14 days no update",
+            pressure_tone(stale),
+            "Open issue not updated for 14+ days.",
+        )
+    with cols[4]:
+        card(
+            "High priority",
+            format_int(high_priority),
+            "Urgent/high open",
+            pressure_tone(high_priority),
+            "Open issue priority urgent or high.",
+        )
 
 
 def issue_table(title: str, data, source: str) -> None:
@@ -24,6 +90,7 @@ def main() -> None:
     page_header("Issues", "Follow-up queues from the current issue table")
 
     filters = render_global_filters(config)
+    render_issue_kpis(load_kpis(config, filters))
 
     tab_overdue, tab_due, tab_stale, tab_priority, tab_all = st.tabs(
         ["Overdue", "Due soon", "Stale", "High priority", "Explorer"]

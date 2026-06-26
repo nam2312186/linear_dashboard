@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -12,10 +13,13 @@ from lib.auth import require_login
 from lib.constants import STATE_ORDER
 
 
+LOGO_PATH = Path(__file__).resolve().parents[1] / "assets" / "logo.png"
+
+
 def setup_page(title: str) -> None:
     st.set_page_config(
         page_title=f"{title} | Fanme Linear",
-        page_icon="F",
+        page_icon=LOGO_PATH,
         layout="wide",
         initial_sidebar_state="expanded",
     )
@@ -173,6 +177,9 @@ def inject_css() -> None:
         .fanme-card.danger:before { background: var(--fanme-red); }
         .fanme-card.info:before { background: var(--fanme-blue); }
         .fanme-card-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             color: var(--fanme-muted);
             font-size: 0.76rem;
             font-weight: 680;
@@ -199,6 +206,9 @@ def inject_css() -> None:
             background: #ffffff;
         }
         .fanme-alert-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             color: var(--fanme-muted);
             font-size: 0.75rem;
             font-weight: 700;
@@ -215,6 +225,29 @@ def inject_css() -> None:
         .fanme-alert.warn { border-left: 4px solid var(--fanme-amber); }
         .fanme-alert.info { border-left: 4px solid var(--fanme-blue); }
         .fanme-alert.good { border-left: 4px solid var(--fanme-green); }
+        .fanme-help {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 15px;
+            height: 15px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            color: #64748b;
+            background: #f8fafc;
+            font-size: 0.68rem;
+            font-weight: 760;
+            line-height: 1;
+            text-transform: none;
+            letter-spacing: 0;
+            cursor: help;
+            transform: translateY(-1px);
+        }
+        .fanme-help:hover {
+            color: #2563eb;
+            border-color: #93c5fd;
+            background: #eff6ff;
+        }
         .fanme-login {
             max-width: 420px;
             margin: 18vh auto 18px;
@@ -281,14 +314,50 @@ def num(value: Any, default: float = 0) -> float:
     return float(value)
 
 
-def card(label: str, value: str, note: str = "", tone: str = "info") -> None:
+def safe_ratio(numerator: Any, denominator: Any) -> float:
+    bottom = num(denominator)
+    if bottom <= 0:
+        return 0
+    return max(num(numerator), 0) / bottom
+
+
+def ratio_label(value: float) -> str:
+    return f"{value:.0%}"
+
+
+def good_ratio_tone(value: float, warn_at: float = 0.7, good_at: float = 0.85) -> str:
+    if value >= good_at:
+        return "good"
+    if value >= warn_at:
+        return "warn"
+    return "danger"
+
+
+def pressure_tone(value: Any) -> str:
+    return "danger" if num(value) > 0 else "good"
+
+
+def help_icon(help_text: str | None) -> str:
+    if not help_text:
+        return ""
+    return f'<span class="fanme-help" title="{html.escape(help_text)}">?</span>'
+
+
+def card(
+    label: str,
+    value: str,
+    note: str = "",
+    tone: str = "info",
+    help_text: str | None = None,
+) -> None:
     safe_label = html.escape(label)
     safe_value = html.escape(value)
     safe_note = html.escape(note)
+    help_html = help_icon(help_text)
     st.markdown(
         f"""
         <div class="fanme-card {tone}">
-            <div class="fanme-card-title">{safe_label}</div>
+            <div class="fanme-card-title">{safe_label}{help_html}</div>
             <div class="fanme-card-value">{safe_value}</div>
             <div class="fanme-card-note">{safe_note}</div>
         </div>
@@ -297,11 +366,17 @@ def card(label: str, value: str, note: str = "", tone: str = "info") -> None:
     )
 
 
-def alert_tile(label: str, value: str, tone: str = "info") -> None:
+def alert_tile(
+    label: str,
+    value: str,
+    tone: str = "info",
+    help_text: str | None = None,
+) -> None:
+    help_html = help_icon(help_text)
     st.markdown(
         f"""
         <div class="fanme-alert {tone}">
-            <div class="fanme-alert-label">{html.escape(label)}</div>
+            <div class="fanme-alert-label">{html.escape(label)}{help_html}</div>
             <div class="fanme-alert-value">{html.escape(value)}</div>
         </div>
         """,

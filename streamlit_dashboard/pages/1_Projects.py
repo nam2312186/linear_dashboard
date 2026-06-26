@@ -9,7 +9,84 @@ import streamlit as st
 from lib.bq import load_config
 from lib.filters import render_global_filters
 from lib.queries import load_project_rollup, load_project_timeline
-from lib.ui import apply_chart_style, page_header, progress_points, section_header, setup_page
+from lib.ui import (
+    apply_chart_style,
+    card,
+    format_int,
+    format_progress,
+    good_ratio_tone,
+    page_header,
+    pressure_tone,
+    progress_points,
+    ratio_label,
+    safe_ratio,
+    section_header,
+    setup_page,
+)
+
+
+RISKY_HEALTHS = {"atrisk", "at risk", "offtrack", "off track"}
+
+
+def render_project_kpis(projects: pd.DataFrame) -> None:
+    project_count = len(projects)
+    open_issues = int(projects["open_issues"].sum())
+    overdue_issues = int(projects["overdue_issues"].sum())
+    unassigned_open = int(projects["unassigned_open_issues"].sum())
+    stale_open = int(projects["stale_open_issues"].sum())
+    risky_projects = int(projects["project_health"].str.lower().isin(RISKY_HEALTHS).sum())
+    completed = int(projects["completed_issues"].sum())
+    non_canceled = int((projects["total_issues"] - projects["canceled_issues"]).sum())
+    completion = safe_ratio(completed, non_canceled)
+    stable_projects = projects[
+        (projects["overdue_issues"] == 0)
+        & (projects["stale_open_issues"] == 0)
+        & (projects["unassigned_open_issues"] == 0)
+        & ~projects["project_health"].str.lower().isin(RISKY_HEALTHS)
+    ]
+    operating_ratio = safe_ratio(len(stable_projects), project_count)
+
+    cols = st.columns(5)
+    with cols[0]:
+        card(
+            "Operating ratio",
+            ratio_label(operating_ratio),
+            f"{format_int(len(stable_projects))}/{format_int(project_count)} stable projects",
+            good_ratio_tone(operating_ratio),
+            "Stable projects / total projects shown.",
+        )
+    with cols[1]:
+        card(
+            "Project load",
+            format_int(project_count),
+            f"{format_int(open_issues)} open issues",
+            "info",
+            "Projects shown and their open issues.",
+        )
+    with cols[2]:
+        card(
+            "Issue completion",
+            format_progress(completion),
+            f"{format_int(completed)} completed",
+            good_ratio_tone(completion, warn_at=0.45, good_at=0.7),
+            "Completed / (total - canceled).",
+        )
+    with cols[3]:
+        card(
+            "Deadline pressure",
+            format_int(overdue_issues),
+            f"{format_int(risky_projects)} risky projects",
+            pressure_tone(overdue_issues + risky_projects),
+            "Overdue open issues + risky projects.",
+        )
+    with cols[4]:
+        card(
+            "Ownership gap",
+            format_int(unassigned_open),
+            f"{format_int(stale_open)} stale open",
+            pressure_tone(unassigned_open + stale_open),
+            "Unassigned open + stale open.",
+        )
 
 
 def render_project_maps(projects: pd.DataFrame) -> None:
@@ -140,6 +217,7 @@ def main() -> None:
         st.info("No projects for the selected filters.")
         return
 
+    render_project_kpis(projects)
     render_project_maps(projects)
     render_project_table(projects, config["current_table"])
     render_timeline(load_project_timeline(config, filters))

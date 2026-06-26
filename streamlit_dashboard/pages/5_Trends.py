@@ -6,12 +6,86 @@ import streamlit as st
 from lib.bq import load_config
 from lib.filters import render_global_filters
 from lib.queries import load_completion_events, load_snapshot_trend
-from lib.ui import apply_chart_style, page_header, progress_points, section_header, setup_page
+from lib.ui import (
+    apply_chart_style,
+    card,
+    format_int,
+    format_progress,
+    good_ratio_tone,
+    page_header,
+    pressure_tone,
+    progress_points,
+    ratio_label,
+    safe_ratio,
+    section_header,
+    setup_page,
+)
 
 
 def as_ratio(value):
     points = progress_points(value)
     return None if points is None else points / 100
+
+
+def signed_int(value: float) -> str:
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:,.0f} vs range start"
+
+
+def render_trend_kpis(trend, events) -> None:
+    ordered = trend.sort_values("snapshot_hour")
+    first = ordered.iloc[0]
+    latest = ordered.iloc[-1]
+    open_issues = int(latest["open_issues"] or 0)
+    overdue = int(latest["overdue_issues"] or 0)
+    on_time_ratio = safe_ratio(open_issues - overdue, open_issues)
+    completion = latest["issue_completion_ratio"]
+    open_delta = float(latest["open_issues"] - first["open_issues"])
+    overdue_delta = float(latest["overdue_issues"] - first["overdue_issues"])
+    completed_events = int(events["completed_events"].sum()) if not events.empty else 0
+    canceled_events = int(events["canceled_events"].sum()) if not events.empty else 0
+
+    cols = st.columns(5)
+    with cols[0]:
+        card(
+            "Operating ratio",
+            ratio_label(on_time_ratio),
+            f"{format_int(overdue)} overdue now",
+            good_ratio_tone(on_time_ratio),
+            "Latest open not overdue / latest open.",
+        )
+    with cols[1]:
+        card(
+            "Open trend",
+            format_int(open_issues),
+            signed_int(open_delta),
+            "danger" if open_delta > 0 else "good",
+            "Latest open vs range start.",
+        )
+    with cols[2]:
+        card(
+            "Completion",
+            format_progress(completion),
+            "Latest snapshot",
+            good_ratio_tone(safe_ratio(completion, 1), warn_at=0.45, good_at=0.7),
+            "Completed / (total - canceled).",
+        )
+    with cols[3]:
+        card(
+            "Overdue trend",
+            format_int(overdue),
+            signed_int(overdue_delta),
+            pressure_tone(overdue),
+            "Latest overdue vs range start.",
+        )
+    with cols[4]:
+        card(
+            "Closure events",
+            format_int(completed_events),
+            f"{format_int(canceled_events)} canceled",
+            "good" if completed_events >= canceled_events else "warn",
+            "State changes inferred from snapshots.",
+        )
 
 
 def main() -> None:
@@ -28,6 +102,8 @@ def main() -> None:
     if trend.empty:
         st.warning("No snapshot data in the selected history window.")
         return
+
+    render_trend_kpis(trend, events)
 
     chart_trend = trend.copy()
     chart_trend["avg_project_progress_ratio"] = chart_trend["avg_project_progress"].map(as_ratio)

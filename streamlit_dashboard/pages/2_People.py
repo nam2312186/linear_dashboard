@@ -6,7 +6,76 @@ import streamlit as st
 from lib.bq import load_config
 from lib.filters import render_global_filters
 from lib.queries import load_issue_queue, load_people_rollup
-from lib.ui import apply_chart_style, page_header, section_header, setup_page
+from lib.ui import (
+    apply_chart_style,
+    card,
+    format_int,
+    good_ratio_tone,
+    page_header,
+    pressure_tone,
+    ratio_label,
+    safe_ratio,
+    section_header,
+    setup_page,
+)
+
+
+def render_people_kpis(people) -> None:
+    active_people = people[people["open_issues"] > 0]
+    healthy_people = active_people[
+        (active_people["overdue_issues"] == 0)
+        & (active_people["stale_open_issues"] == 0)
+        & (active_people["high_priority_open_issues"] == 0)
+    ]
+    operating_ratio = safe_ratio(len(healthy_people), len(active_people))
+    open_issues = int(people["open_issues"].sum())
+    started = int(people["started_issues"].sum())
+    overdue = int(people["overdue_issues"].sum())
+    overdue_people = int((people["overdue_issues"] > 0).sum())
+    high_priority = int(people["high_priority_open_issues"].sum())
+    stale = int(people["stale_open_issues"].sum())
+
+    cols = st.columns(5)
+    with cols[0]:
+        card(
+            "Operating ratio",
+            ratio_label(operating_ratio),
+            f"{format_int(len(healthy_people))}/{format_int(len(active_people))} active people clear",
+            good_ratio_tone(operating_ratio),
+            "Clear active people / active people.",
+        )
+    with cols[1]:
+        card(
+            "People",
+            format_int(len(people)),
+            f"{format_int(len(active_people))} with open work",
+            "info",
+            "Assignees after current filters.",
+        )
+    with cols[2]:
+        card(
+            "Open load",
+            format_int(open_issues),
+            f"{format_int(started)} started",
+            "info",
+            "Open = triage + backlog + unstarted + started.",
+        )
+    with cols[3]:
+        card(
+            "Overdue pressure",
+            format_int(overdue),
+            f"{format_int(overdue_people)} people impacted",
+            pressure_tone(overdue),
+            "Open issue due date before today.",
+        )
+    with cols[4]:
+        card(
+            "Priority & stale",
+            format_int(high_priority),
+            f"{format_int(stale)} stale open",
+            pressure_tone(high_priority + stale),
+            "Urgent/high open + stale open.",
+        )
 
 
 def render_people_charts(people):
@@ -57,11 +126,7 @@ def main() -> None:
         st.info("No people data for the selected filters.")
         return
 
-    cols = st.columns(4)
-    cols[0].metric("People", f"{len(people):,}")
-    cols[1].metric("Open issues", f"{int(people['open_issues'].sum()):,}")
-    cols[2].metric("Overdue", f"{int(people['overdue_issues'].sum()):,}")
-    cols[3].metric("High priority", f"{int(people['high_priority_open_issues'].sum()):,}")
+    render_people_kpis(people)
 
     render_people_charts(people)
 
