@@ -32,6 +32,7 @@ from lib.ui import (
     section_header,
     setup_page,
     state_bar,
+    workflow_stack_bar,
 )
 
 
@@ -100,6 +101,10 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
     unassigned = int_value(row, "unassigned_open_issues")
     due_soon = int_value(row, "due_soon_issues")
     high_priority = int_value(row, "high_priority_open_issues")
+    backlog = int_value(row, "backlog_issues")
+    todo = int_value(row, "todo_issues")
+    in_process = int_value(row, "in_process_issues")
+    review = int_value(row, "review_issues")
     completion = completion_ratio(row)
     operating_ratio = safe_ratio(int_value(row, "open_issues") - overdue, row["open_issues"])
 
@@ -135,7 +140,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             format_int(row["open_issues"]),
             signed(trend_delta(trend, "open_issues")),
             "info",
-            "Open = triage + backlog + unstarted + started.",
+            "Open uses Linear lifecycle type; workflow split: Backlog, Todo, In Process, Review.",
         )
     with cols[2]:
         card(
@@ -179,10 +184,10 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
         )
     with c:
         alert_tile(
-            "In progress",
-            format_int(row["in_progress_issues"]),
+            "In Process / Review",
+            f"{format_int(in_process)} / {format_int(review)}",
             "info",
-            "Issue ở state started.",
+            f"Todo {format_int(todo)}; backlog {format_int(backlog)}.",
         )
     with d:
         alert_tile(
@@ -213,9 +218,12 @@ def render_snapshot_trend(trend: pd.DataFrame, snapshot_table: str) -> None:
         fig = go.Figure()
         for column, label, color, width in [
             ("open_issues", "Open", "#2563eb", 3),
-            ("started_issues", "Started", "#d97706", 2),
+            ("backlog_issues", "Backlog", "#64748b", 2),
+            ("todo_issues", "Todo", "#3b82f6", 2),
+            ("in_process_issues", "In Process", "#d97706", 2),
+            ("review_issues", "Review", "#7c3aed", 2),
+            ("done_issues", "Done", "#16a34a", 2),
             ("overdue_issues", "Overdue", "#dc2626", 2),
-            ("completed_issues", "Completed", "#16a34a", 2),
         ]:
             fig.add_trace(
                 go.Scatter(
@@ -285,6 +293,11 @@ def project_update_frame(projects: pd.DataFrame, limit: int = 12) -> pd.DataFram
             "project_progress",
             "issue_completion_ratio",
             "open_issues",
+            "backlog_issues",
+            "todo_issues",
+            "in_process_issues",
+            "review_issues",
+            "done_issues",
             "overdue_issues",
             "due_soon_issues",
             "unassigned_open_issues",
@@ -377,6 +390,7 @@ def queue_frame(data: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
         "issue_due_date",
         "days_overdue",
         "days_since_update",
+        "workflow_state",
         "issue_url",
     ]
     return data[[column for column in columns if column in data.columns]].head(limit)
@@ -414,10 +428,10 @@ def render_attention_queues(
 
 
 def render_current_mix(state_breakdown: pd.DataFrame, events: pd.DataFrame) -> None:
-    section_header("Current work mix", "State distribution and completed/canceled movement.")
+    section_header("Current work mix", "Workflow state distribution and Done/Canceled movement.")
     left, right = st.columns([1, 1])
     with left:
-        state_bar(state_breakdown, "Issue state mix")
+        state_bar(state_breakdown, "Workflow state mix")
     with right:
         if events.empty:
             st.info("No completion events in the selected snapshot range.")
@@ -426,8 +440,8 @@ def render_current_mix(state_breakdown: pd.DataFrame, events: pd.DataFrame) -> N
         fig.add_trace(
             go.Bar(
                 x=events["event_date"],
-                y=events["completed_events"],
-                name="Completed",
+                y=events["done_events"] if "done_events" in events else events["completed_events"],
+                name="Done",
                 marker_color="#16a34a",
             )
         )
@@ -439,7 +453,7 @@ def render_current_mix(state_breakdown: pd.DataFrame, events: pd.DataFrame) -> N
                 marker_color="#64748b",
             )
         )
-        fig.update_layout(barmode="group", title="Daily closure events")
+        fig.update_layout(barmode="group", title="Daily workflow closure events")
         st.plotly_chart(apply_chart_style(fig, height=360), width="stretch")
 
 
@@ -451,38 +465,22 @@ def render_capacity(people: pd.DataFrame, teams: pd.DataFrame, current_table: st
     )
     left, right = st.columns([1, 1])
     with left:
-        if people.empty:
-            st.info("No people data for the selected filters.")
-        else:
-            top_people = people.head(12).sort_values("open_issues", ascending=True)
-            fig = px.bar(
-                top_people,
-                x="open_issues",
-                y="assignee_name",
-                orientation="h",
-                color="overdue_issues",
-                color_continuous_scale=["#dbeafe", "#f59e0b", "#dc2626"],
-                title="Open load by person",
-                labels={"assignee_name": "Person", "open_issues": "Open", "overdue_issues": "Overdue"},
-            )
-            st.plotly_chart(apply_chart_style(fig, height=390), width="stretch")
+        workflow_stack_bar(
+            people,
+            "assignee_name",
+            "Workflow load by person",
+            limit=12,
+            height=390,
+        )
 
     with right:
-        if teams.empty:
-            st.info("No team data for the selected filters.")
-        else:
-            top_teams = teams.head(12).sort_values("open_issues", ascending=True)
-            fig = px.bar(
-                top_teams,
-                x="open_issues",
-                y="team_key",
-                orientation="h",
-                color="started_issues",
-                color_continuous_scale=["#e0f2fe", "#2563eb"],
-                title="Open load by team",
-                labels={"team_key": "Team", "open_issues": "Open", "started_issues": "Started"},
-            )
-            st.plotly_chart(apply_chart_style(fig, height=390), width="stretch")
+        workflow_stack_bar(
+            teams,
+            "team_key",
+            "Workflow load by team",
+            limit=12,
+            height=390,
+        )
 
 
 def main() -> None:

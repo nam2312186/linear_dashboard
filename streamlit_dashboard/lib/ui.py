@@ -10,10 +10,20 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from lib.auth import require_login
-from lib.constants import STATE_ORDER
+from lib.constants import WORKFLOW_STATE_LABELS, WORKFLOW_STATE_ORDER
 
 
 LOGO_PATH = Path(__file__).resolve().parents[1] / "assets" / "logo.png"
+WORKFLOW_COUNT_COLUMNS = [
+    (f"{bucket}_issues", label) for bucket, label in WORKFLOW_STATE_LABELS.items()
+]
+WORKFLOW_STATE_COLORS = {
+    "Backlog": "#64748b",
+    "Todo": "#2563eb",
+    "In Process": "#d97706",
+    "Review": "#7c3aed",
+    "Done": "#16a34a",
+}
 
 
 def setup_page(title: str) -> None:
@@ -418,12 +428,77 @@ def apply_chart_style(fig: go.Figure, height: int = 360) -> go.Figure:
     return fig
 
 
-def state_order(df: pd.DataFrame) -> list[str]:
-    if "state_type" not in df:
-        return STATE_ORDER
-    existing = [state for state in STATE_ORDER if state in set(df["state_type"])]
-    existing.extend(sorted(set(df["state_type"]) - set(existing)))
-    return existing
+def workflow_state_order(df: pd.DataFrame) -> list[str]:
+    if "workflow_state" not in df:
+        return WORKFLOW_STATE_ORDER
+
+    values = [str(value) for value in df["workflow_state"].dropna().unique()]
+    remaining = {value.casefold(): value for value in values}
+    ordered: list[str] = []
+    for preferred in WORKFLOW_STATE_ORDER:
+        actual = remaining.pop(preferred.casefold(), None)
+        if actual is not None:
+            ordered.append(actual)
+
+    ordered.extend(sorted(remaining.values(), key=str.casefold))
+    return ordered
+
+
+def workflow_stack_bar(
+    df: pd.DataFrame,
+    entity_column: str,
+    title: str,
+    limit: int = 20,
+    sort_column: str = "open_issues",
+    height: int = 420,
+) -> None:
+    if df.empty or entity_column not in df:
+        no_data()
+        return
+
+    count_columns = [column for column, _ in WORKFLOW_COUNT_COLUMNS if column in df]
+    if not count_columns:
+        no_data()
+        return
+
+    sort_by = sort_column if sort_column in df else count_columns[0]
+    top = df.sort_values(sort_by, ascending=False).head(limit).copy()
+    top[entity_column] = top[entity_column].astype(str)
+    entity_order = top[entity_column].tolist()[::-1]
+
+    label_by_column = dict(WORKFLOW_COUNT_COLUMNS)
+    chart = top[[entity_column, *count_columns]].melt(
+        id_vars=entity_column,
+        value_vars=count_columns,
+        var_name="workflow_metric",
+        value_name="issue_count",
+    )
+    chart["workflow_state"] = chart["workflow_metric"].map(label_by_column)
+    chart = chart[chart["issue_count"].fillna(0) > 0]
+    if chart.empty:
+        no_data()
+        return
+
+    fig = px.bar(
+        chart,
+        x="issue_count",
+        y=entity_column,
+        color="workflow_state",
+        orientation="h",
+        title=title,
+        category_orders={
+            entity_column: entity_order,
+            "workflow_state": list(WORKFLOW_STATE_LABELS.values()),
+        },
+        labels={
+            entity_column: "",
+            "issue_count": "Issues",
+            "workflow_state": "Workflow state",
+        },
+        color_discrete_map=WORKFLOW_STATE_COLORS,
+    )
+    fig.update_layout(showlegend=True)
+    st.plotly_chart(apply_chart_style(fig, height=height), width="stretch")
 
 
 def health_color(value: str | None) -> str:
@@ -453,20 +528,20 @@ def risk_badge(score: Any) -> str:
 
 
 def state_bar(df: pd.DataFrame, title: str) -> None:
-    if df.empty:
+    if df.empty or "workflow_state" not in df:
         no_data()
         return
-    state_totals = df.groupby("state_type", as_index=False)["issue_count"].sum()
+    state_totals = df.groupby("workflow_state", as_index=False)["issue_count"].sum()
     fig = px.bar(
         state_totals,
         x="issue_count",
-        y="state_type",
+        y="workflow_state",
         orientation="h",
-        category_orders={"state_type": state_order(state_totals)},
-        labels={"issue_count": "Issues", "state_type": "State"},
+        category_orders={"workflow_state": workflow_state_order(state_totals)},
+        labels={"issue_count": "Issues", "workflow_state": "Workflow state"},
         title=title,
-        color="state_type",
-        color_discrete_sequence=px.colors.qualitative.Set2,
+        color="workflow_state",
+        color_discrete_map=WORKFLOW_STATE_COLORS,
     )
     fig.update_layout(height=360, margin=dict(l=10, r=10, t=45, b=10), showlegend=False)
     st.plotly_chart(fig, width="stretch")

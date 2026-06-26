@@ -17,6 +17,7 @@ from lib.ui import (
     safe_ratio,
     section_header,
     setup_page,
+    workflow_stack_bar,
 )
 
 
@@ -29,7 +30,9 @@ def render_people_kpis(people) -> None:
     ]
     operating_ratio = safe_ratio(len(healthy_people), len(active_people))
     open_issues = int(people["open_issues"].sum())
-    started = int(people["started_issues"].sum())
+    todo = int(people["todo_issues"].sum())
+    in_process = int(people["in_process_issues"].sum())
+    review = int(people["review_issues"].sum())
     overdue = int(people["overdue_issues"].sum())
     overdue_people = int((people["overdue_issues"] > 0).sum())
     high_priority = int(people["high_priority_open_issues"].sum())
@@ -56,9 +59,9 @@ def render_people_kpis(people) -> None:
         card(
             "Open load",
             format_int(open_issues),
-            f"{format_int(started)} started",
+            f"{format_int(in_process)} in process, {format_int(review)} review",
             "info",
-            "Open = triage + backlog + unstarted + started.",
+            f"Todo {format_int(todo)}; open uses Linear lifecycle type.",
         )
     with cols[3]:
         card(
@@ -82,18 +85,13 @@ def render_people_charts(people):
     left, right = st.columns([1, 1])
 
     with left:
-        top_open = people.head(25).sort_values("open_issues", ascending=True)
-        fig = px.bar(
-            top_open,
-            x="open_issues",
-            y="assignee_name",
-            orientation="h",
-            color="started_issues",
-            color_continuous_scale="Blues",
-            title="Open workload by person",
-            labels={"assignee_name": "Person", "open_issues": "Open issues", "started_issues": "Started"},
+        workflow_stack_bar(
+            people,
+            "assignee_name",
+            "Workflow load by person",
+            limit=25,
+            height=500,
         )
-        st.plotly_chart(apply_chart_style(fig, height=500), width="stretch")
 
     with right:
         risk = people.sort_values(["overdue_issues", "high_priority_open_issues"], ascending=True).tail(25)
@@ -130,7 +128,7 @@ def main() -> None:
 
     render_people_charts(people)
 
-    section_header("Current people update table", "Ownership, open load and stale work by assignee.", config["current_table"])
+    section_header("Current people update table", "Ownership, workflow load and stale work by assignee.", config["current_table"])
     st.dataframe(people, width="stretch", hide_index=True)
 
     section_header("Unassigned and overdue queues", "Open issues requiring management follow-up.", config["current_table"])

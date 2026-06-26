@@ -4,7 +4,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.queries import load_issue_queue, load_kpis, load_raw_issues
+from lib.queries import load_issue_queue, load_kpis, load_raw_issues, load_state_breakdown
 from lib.ui import (
     card,
     format_int,
@@ -15,6 +15,7 @@ from lib.ui import (
     safe_ratio,
     section_header,
     setup_page,
+    state_bar,
 )
 
 
@@ -29,6 +30,9 @@ def render_issue_kpis(kpis) -> None:
     stale = int(row["stale_open_issues"] or 0)
     high_priority = int(row["high_priority_open_issues"] or 0)
     unassigned = int(row["unassigned_open_issues"] or 0)
+    todo = int(row["todo_issues"] or 0)
+    in_process = int(row["in_process_issues"] or 0)
+    review = int(row["review_issues"] or 0)
     on_time_ratio = safe_ratio(open_issues - overdue, open_issues)
 
     cols = st.columns(5)
@@ -44,9 +48,9 @@ def render_issue_kpis(kpis) -> None:
         card(
             "Open issues",
             format_int(open_issues),
-            f"{format_int(unassigned)} unassigned",
+            f"Todo {format_int(todo)}; In Process/Review {format_int(in_process)}/{format_int(review)}",
             "info",
-            "Open = triage + backlog + unstarted + started.",
+            f"{format_int(unassigned)} unassigned open issues.",
         )
     with cols[2]:
         card(
@@ -90,7 +94,11 @@ def main() -> None:
     page_header("Issues", "Follow-up queues from the current issue table")
 
     filters = render_global_filters(config)
-    render_issue_kpis(load_kpis(config, filters))
+    kpis = load_kpis(config, filters)
+    render_issue_kpis(kpis)
+
+    section_header("Workflow state mix", "Current issue distribution by workflow state.", config["current_table"])
+    state_bar(load_state_breakdown(config, filters), "Workflow state mix")
 
     tab_overdue, tab_due, tab_stale, tab_priority, tab_all = st.tabs(
         ["Overdue", "Due soon", "Stale", "High priority", "Explorer"]

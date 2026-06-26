@@ -553,7 +553,7 @@ def ensure_dataset_exists(client: bigquery.Client) -> None:
 
 def ensure_current_table_exists(client: bigquery.Client) -> None:
     table = bigquery.Table(CURRENT_TABLE_FQN, schema=CURRENT_SCHEMA)
-    table.clustering_fields = ["project_id", "team_key", "state_type", "assignee_id"]
+    table.clustering_fields = ["project_id", "team_key", "state_name", "assignee_id"]
     client.create_table(table, exists_ok=True)
     print(f"[BQ] ensured current table exists: {CURRENT_TABLE_FQN}")
 
@@ -561,7 +561,7 @@ def ensure_current_table_exists(client: bigquery.Client) -> None:
 def ensure_snapshot_table_exists(client: bigquery.Client) -> None:
     table = bigquery.Table(SNAPSHOT_TABLE_FQN, schema=SNAPSHOT_SCHEMA)
     table.time_partitioning = bigquery.TimePartitioning(field="snapshot_date")
-    table.clustering_fields = ["project_id", "team_key", "state_type", "assignee_id"]
+    table.clustering_fields = ["project_id", "team_key", "state_name", "assignee_id"]
     client.create_table(table, exists_ok=True)
     print(f"[BQ] ensured snapshot table exists: {SNAPSHOT_TABLE_FQN}")
 
@@ -676,7 +676,7 @@ def load_current_and_snapshot(rows: list[dict[str, Any]], snapshot_rows: list[di
             client,
             current_temp_fqn,
             CURRENT_SCHEMA,
-            clustering_fields=["project_id", "team_key", "state_type", "assignee_id"],
+            clustering_fields=["project_id", "team_key", "state_name", "assignee_id"],
         )
         create_temp_table(client, snapshot_temp_fqn, SNAPSHOT_SCHEMA)
 

@@ -5,8 +5,26 @@ from typing import Any
 import pandas as pd
 
 from lib.bq import params_json, run_query
-from lib.constants import HIGH_PRIORITY_LABELS, OPEN_STATE_TYPES
+from lib.constants import HIGH_PRIORITY_LABELS, OPEN_STATE_TYPES, WORKFLOW_STATE_BUCKETS
 from lib.filters import filter_clause, query_params, sql_list
+
+
+def workflow_state_condition(bucket: str, column: str = "state_name") -> str:
+    return f"LOWER(TRIM(COALESCE({column}, ''))) IN ({sql_list(WORKFLOW_STATE_BUCKETS[bucket])})"
+
+
+def workflow_state_count_expr(bucket: str, alias: str | None = None) -> str:
+    column_alias = alias or bucket
+    return f"COUNTIF({workflow_state_condition(bucket)}) AS {column_alias}_issues"
+
+
+def workflow_state_count_columns(indent: str = "      ", trailing_comma: bool = True) -> str:
+    buckets = list(WORKFLOW_STATE_BUCKETS)
+    lines = []
+    for index, bucket in enumerate(buckets):
+        comma = "," if trailing_comma or index < len(buckets) - 1 else ""
+        lines.append(f"{indent}{workflow_state_count_expr(bucket)}{comma}")
+    return "\n".join(lines)
 
 
 def load_kpis(config: dict[str, str], filters: dict[str, Any]) -> pd.DataFrame:
@@ -32,9 +50,9 @@ def load_kpis(config: dict[str, str], filters: dict[str, Any]) -> pd.DataFrame:
     SELECT
       COUNT(*) AS total_issues,
       COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
-      COUNTIF(state_type = 'started') AS in_progress_issues,
       COUNTIF(state_type = 'completed') AS completed_issues,
       COUNTIF(state_type = 'canceled') AS canceled_issues,
+{workflow_state_count_columns()}
       COUNTIF(assignee_id IS NULL AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS unassigned_open_issues,
       COUNTIF(issue_due_date < CURRENT_DATE() AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
       COUNTIF(issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
@@ -56,14 +74,18 @@ def load_kpis(config: dict[str, str], filters: dict[str, Any]) -> pd.DataFrame:
 def load_state_breakdown(config: dict[str, str], filters: dict[str, Any]) -> pd.DataFrame:
     sql = f"""
     SELECT
-      COALESCE(state_type, '(blank)') AS state_type,
-      COALESCE(state_name, '(blank)') AS state_name,
-      COUNT(*) AS issue_count
+      COALESCE(state_name, '(blank)') AS workflow_state,
+      COALESCE(state_type, '(blank)') AS lifecycle_state_type,
+      MIN(state_position) AS workflow_position,
+      COUNT(*) AS issue_count,
+      COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
+      COUNTIF(state_type = 'completed') AS completed_issues,
+      COUNTIF(state_type = 'canceled') AS canceled_issues
     FROM `{config["current_table"]}`
     WHERE TRUE
     {filter_clause()}
     GROUP BY 1, 2
-    ORDER BY issue_count DESC
+    ORDER BY IF(workflow_position IS NULL, 1, 0), workflow_position, issue_count DESC
     """
     return run_query(sql, params_json(**query_params(filters)), config["location"])
 
@@ -91,9 +113,9 @@ def load_project_rollup(config: dict[str, str], filters: dict[str, Any], limit: 
         ANY_VALUE(project_priority) AS project_priority,
         COUNT(*) AS total_issues,
         COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
-        COUNTIF(state_type = 'started') AS started_issues,
         COUNTIF(state_type = 'completed') AS completed_issues,
         COUNTIF(state_type = 'canceled') AS canceled_issues,
+{workflow_state_count_columns(indent="        ")}
         COUNTIF(issue_due_date < CURRENT_DATE()
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
         COUNTIF(issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
@@ -134,8 +156,9 @@ def load_team_rollup(config: dict[str, str], filters: dict[str, Any]) -> pd.Data
       COALESCE(team_name, '(blank)') AS team_name,
       COUNT(*) AS total_issues,
       COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
-      COUNTIF(state_type = 'started') AS started_issues,
       COUNTIF(state_type = 'completed') AS completed_issues,
+      COUNTIF(state_type = 'canceled') AS canceled_issues,
+{workflow_state_count_columns()}
       COUNTIF(issue_due_date < CURRENT_DATE()
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
       COUNTIF(issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
@@ -161,9 +184,9 @@ def load_people_rollup(config: dict[str, str], filters: dict[str, Any], limit: i
       COALESCE(assignee_name, '(unassigned)') AS assignee_name,
       COUNT(*) AS total_issues,
       COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
-      COUNTIF(state_type = 'started') AS started_issues,
       COUNTIF(state_type = 'completed') AS completed_issues,
       COUNTIF(state_type = 'canceled') AS canceled_issues,
+{workflow_state_count_columns()}
       COUNTIF(issue_due_date < CURRENT_DATE()
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
       COUNTIF(issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
@@ -179,7 +202,7 @@ def load_people_rollup(config: dict[str, str], filters: dict[str, Any], limit: i
     WHERE TRUE
     {filter_clause()}
     GROUP BY 1
-    ORDER BY open_issues DESC, started_issues DESC
+    ORDER BY open_issues DESC, in_process_issues DESC, review_issues DESC
     LIMIT @limit
     """
     return run_query(sql, params_json(**params), config["location"])
@@ -212,7 +235,8 @@ def load_issue_queue(config: dict[str, str], filters: dict[str, Any], queue: str
       project_name,
       team_key,
       COALESCE(assignee_name, '(unassigned)') AS assignee_name,
-      state_name,
+      COALESCE(state_name, '(blank)') AS workflow_state,
+      COALESCE(state_type, '(blank)') AS lifecycle_state_type,
       issue_priority_label,
       issue_due_date,
       DATE_DIFF(CURRENT_DATE(), issue_due_date, DAY) AS days_overdue,
@@ -241,9 +265,9 @@ def load_snapshot_trend(config: dict[str, str], filters: dict[str, Any]) -> pd.D
         snapshot_hour,
         COUNT(*) AS total_issues,
         COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
-        COUNTIF(state_type = 'started') AS started_issues,
         COUNTIF(state_type = 'completed') AS completed_issues,
         COUNTIF(state_type = 'canceled') AS canceled_issues,
+{workflow_state_count_columns(indent="        ")}
         COUNTIF(issue_due_date < DATE(snapshot_hour)
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
         COUNT(DISTINCT project_id) AS project_count
@@ -283,13 +307,25 @@ def load_completion_events(config: dict[str, str], filters: dict[str, Any]) -> p
         snapshot_hour,
         issue_id,
         state_type,
-        LAG(state_type) OVER (PARTITION BY issue_id ORDER BY snapshot_hour) AS previous_state_type
+        LAG(state_type) OVER (PARTITION BY issue_id ORDER BY snapshot_hour) AS previous_state_type,
+        COALESCE(state_name, '(blank)') AS workflow_state,
+        LAG(COALESCE(state_name, '(blank)')) OVER (PARTITION BY issue_id ORDER BY snapshot_hour) AS previous_workflow_state
       FROM `{config["snapshot_table"]}`
       WHERE DATE(snapshot_hour) BETWEEN DATE(@snapshot_start_date) AND DATE(@snapshot_end_date)
       {filter_clause(due_reference_date="DATE(snapshot_hour)")}
     )
     SELECT
       DATE(snapshot_hour) AS event_date,
+      COUNTIF({workflow_state_condition("backlog", "workflow_state")}
+              AND NOT ({workflow_state_condition("backlog", "previous_workflow_state")})) AS backlog_events,
+      COUNTIF({workflow_state_condition("todo", "workflow_state")}
+              AND NOT ({workflow_state_condition("todo", "previous_workflow_state")})) AS todo_events,
+      COUNTIF({workflow_state_condition("in_process", "workflow_state")}
+              AND NOT ({workflow_state_condition("in_process", "previous_workflow_state")})) AS in_process_events,
+      COUNTIF({workflow_state_condition("review", "workflow_state")}
+              AND NOT ({workflow_state_condition("review", "previous_workflow_state")})) AS review_events,
+      COUNTIF({workflow_state_condition("done", "workflow_state")}
+              AND NOT ({workflow_state_condition("done", "previous_workflow_state")})) AS done_events,
       COUNTIF(state_type = 'completed'
               AND COALESCE(previous_state_type, '') != 'completed') AS completed_events,
       COUNTIF(state_type = 'canceled'
@@ -319,7 +355,8 @@ def load_project_timeline(config: dict[str, str], filters: dict[str, Any]) -> pd
       ANY_VALUE(project_progress) AS project_progress,
       COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
       COUNTIF(issue_due_date < CURRENT_DATE()
-              AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues
+              AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
+{workflow_state_count_columns(trailing_comma=False)}
     FROM filtered
     GROUP BY project_id
     HAVING project_start_date IS NOT NULL OR project_target_date IS NOT NULL
@@ -338,9 +375,9 @@ def load_raw_issues(config: dict[str, str], filters: dict[str, Any], limit: int)
       issue_title,
       project_name,
       team_key,
-      state_type,
-      state_name,
-      assignee_name,
+      COALESCE(state_name, '(blank)') AS workflow_state,
+      COALESCE(state_type, '(blank)') AS lifecycle_state_type,
+      COALESCE(assignee_name, '(unassigned)') AS assignee_name,
       issue_priority_label,
       issue_due_date,
       issue_updated_at,

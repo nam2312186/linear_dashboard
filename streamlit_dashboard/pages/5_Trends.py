@@ -42,6 +42,7 @@ def render_trend_kpis(trend, events) -> None:
     completion = latest["issue_completion_ratio"]
     open_delta = float(latest["open_issues"] - first["open_issues"])
     overdue_delta = float(latest["overdue_issues"] - first["overdue_issues"])
+    done_events = int(events["done_events"].sum()) if not events.empty and "done_events" in events else 0
     completed_events = int(events["completed_events"].sum()) if not events.empty else 0
     canceled_events = int(events["canceled_events"].sum()) if not events.empty else 0
 
@@ -80,11 +81,11 @@ def render_trend_kpis(trend, events) -> None:
         )
     with cols[4]:
         card(
-            "Closure events",
-            format_int(completed_events),
+            "Done events",
+            format_int(done_events or completed_events),
             f"{format_int(canceled_events)} canceled",
-            "good" if completed_events >= canceled_events else "warn",
-            "State changes inferred from snapshots.",
+            "good" if (done_events or completed_events) >= canceled_events else "warn",
+            "Workflow Done entries inferred from snapshots.",
         )
 
 
@@ -111,10 +112,13 @@ def main() -> None:
     fig = go.Figure()
     for column, color in [
         ("open_issues", "#2563eb"),
-        ("started_issues", "#d97706"),
+        ("backlog_issues", "#64748b"),
+        ("todo_issues", "#3b82f6"),
+        ("in_process_issues", "#d97706"),
+        ("review_issues", "#7c3aed"),
+        ("done_issues", "#16a34a"),
         ("overdue_issues", "#dc2626"),
-        ("completed_issues", "#16a34a"),
-        ("canceled_issues", "#64748b"),
+        ("canceled_issues", "#475569"),
     ]:
         fig.add_trace(
             go.Scatter(
@@ -154,26 +158,30 @@ def main() -> None:
     st.dataframe(trend.sort_values("snapshot_hour", ascending=False), width="stretch", hide_index=True)
 
     if not events.empty:
-        section_header("State-change events inferred from snapshots", "Completed and canceled events detected between snapshots.", config["snapshot_table"])
+        section_header(
+            "Workflow state-change events",
+            "Entries into Todo, In Process, Review, Done and Canceled detected between snapshots.",
+            config["snapshot_table"],
+        )
         fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=events["event_date"],
-                y=events["completed_events"],
-                name="Completed",
-                marker_color="#16a34a",
-            )
-        )
-        fig.add_trace(
-            go.Bar(
-                x=events["event_date"],
-                y=events["canceled_events"],
-                name="Canceled",
-                marker_color="#64748b",
-            )
-        )
+        for column, label, color in [
+            ("todo_events", "Todo", "#3b82f6"),
+            ("in_process_events", "In Process", "#d97706"),
+            ("review_events", "Review", "#7c3aed"),
+            ("done_events", "Done", "#16a34a"),
+            ("canceled_events", "Canceled", "#64748b"),
+        ]:
+            if column in events:
+                fig.add_trace(
+                    go.Bar(
+                        x=events["event_date"],
+                        y=events[column],
+                        name=label,
+                        marker_color=color,
+                    )
+                )
         fig.update_layout(barmode="group")
-        st.plotly_chart(apply_chart_style(fig, height=360), width="stretch")
+        st.plotly_chart(apply_chart_style(fig, height=380), width="stretch")
         st.dataframe(events.sort_values("event_date", ascending=False), width="stretch", hide_index=True)
 
 

@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from lib.bq import params_json, run_query
+from lib.constants import OPEN_STATE_TYPES, WORKFLOW_STATE_ORDER
 
 
 VIETNAM_TZ = timezone(timedelta(hours=7))
@@ -29,13 +30,14 @@ def sql_list(values: list[str] | tuple[str, ...]) -> str:
 
 def filter_clause(alias: str = "", due_reference_date: str = "CURRENT_DATE()") -> str:
     prefix = f"{alias}." if alias else ""
+    open_state_types = sql_list(OPEN_STATE_TYPES)
     return f"""
       AND (@project_all OR COALESCE({prefix}project_name, '(blank)') IN UNNEST(@projects))
       AND (@team_all OR COALESCE({prefix}team_key, '(blank)') IN UNNEST(@teams))
       AND (@assignee_all OR COALESCE({prefix}assignee_name, '(unassigned)') IN UNNEST(@assignees))
       AND (@health_all OR COALESCE({prefix}project_health, '(blank)') IN UNNEST(@healths))
       AND (@project_status_all OR COALESCE({prefix}project_status_name, '(blank)') IN UNNEST(@project_statuses))
-      AND (@state_all OR COALESCE({prefix}state_type, '(blank)') IN UNNEST(@state_types))
+      AND (@workflow_state_all OR COALESCE({prefix}state_name, '(blank)') IN UNNEST(@workflow_states))
       AND (@priority_all OR COALESCE({prefix}issue_priority_label, '(none)') IN UNNEST(@priorities))
       AND (@cycle_all OR COALESCE({prefix}cycle_name, '(no cycle)') IN UNNEST(@cycles))
       AND (
@@ -51,10 +53,10 @@ def filter_clause(alias: str = "", due_reference_date: str = "CURRENT_DATE()") -
         OR ('No due date' IN UNNEST(@due_buckets) AND {prefix}issue_due_date IS NULL)
         OR ('Overdue' IN UNNEST(@due_buckets)
             AND {prefix}issue_due_date < {due_reference_date}
-            AND {prefix}state_type IN ('triage', 'backlog', 'unstarted', 'started'))
+            AND {prefix}state_type IN ({open_state_types}))
         OR ('Due next 7 days' IN UNNEST(@due_buckets)
             AND {prefix}issue_due_date BETWEEN {due_reference_date} AND DATE_ADD({due_reference_date}, INTERVAL 7 DAY)
-            AND {prefix}state_type IN ('triage', 'backlog', 'unstarted', 'started'))
+            AND {prefix}state_type IN ({open_state_types}))
         OR ('Future due' IN UNNEST(@due_buckets)
             AND {prefix}issue_due_date > DATE_ADD({due_reference_date}, INTERVAL 7 DAY))
       )
@@ -65,10 +67,18 @@ def filter_clause(alias: str = "", due_reference_date: str = "CURRENT_DATE()") -
           COALESCE({prefix}issue_title, ''), ' ',
           COALESCE({prefix}project_name, ''), ' ',
           COALESCE({prefix}assignee_name, ''), ' ',
-          COALESCE({prefix}team_key, '')
+          COALESCE({prefix}team_key, ''), ' ',
+          COALESCE({prefix}state_name, '')
         )) LIKE CONCAT('%', LOWER(@search_text), '%')
       )
     """
+
+
+
+def workflow_state_sort_key(value: str) -> tuple[int, str]:
+    normalized = value.casefold()
+    order = {state.casefold(): index for index, state in enumerate(WORKFLOW_STATE_ORDER)}
+    return (order.get(normalized, len(order)), normalized)
 
 
 def normalize_multiselect(values: list[str]) -> list[str]:
@@ -85,7 +95,9 @@ def query_params(filters: dict[str, Any]) -> dict[str, Any]:
     assignees = normalize_multiselect(filters["assignees"])
     healths = normalize_multiselect(filters["healths"])
     project_statuses = normalize_multiselect(filters["project_statuses"])
-    state_types = normalize_multiselect(filters["state_types"])
+    workflow_states = normalize_multiselect(
+        filters.get("workflow_states", filters.get("state_types", []))
+    )
     priorities = normalize_multiselect(filters["priorities"])
     cycles = normalize_multiselect(filters["cycles"])
     labels = normalize_multiselect(filters["labels"])
@@ -96,7 +108,7 @@ def query_params(filters: dict[str, Any]) -> dict[str, Any]:
         "assignees": empty_to_all(assignees),
         "healths": empty_to_all(healths),
         "project_statuses": empty_to_all(project_statuses),
-        "state_types": empty_to_all(state_types),
+        "workflow_states": empty_to_all(workflow_states),
         "priorities": empty_to_all(priorities),
         "cycles": empty_to_all(cycles),
         "labels": empty_to_all(labels),
@@ -106,7 +118,7 @@ def query_params(filters: dict[str, Any]) -> dict[str, Any]:
         "assignee_all": not assignees,
         "health_all": not healths,
         "project_status_all": not project_statuses,
-        "state_all": not state_types,
+        "workflow_state_all": not workflow_states,
         "priority_all": not priorities,
         "cycle_all": not cycles,
         "label_all": not labels,
@@ -125,7 +137,7 @@ def load_dimensions(config: dict[str, str]) -> pd.DataFrame:
       COALESCE(assignee_name, '(unassigned)') AS assignee_name,
       COALESCE(project_health, '(blank)') AS project_health,
       COALESCE(project_status_name, '(blank)') AS project_status_name,
-      COALESCE(state_type, '(blank)') AS state_type,
+      COALESCE(state_name, '(blank)') AS workflow_state,
       COALESCE(issue_priority_label, '(none)') AS issue_priority_label,
       COALESCE(cycle_name, '(no cycle)') AS cycle_name,
       label_name
@@ -159,7 +171,10 @@ def render_global_filters(config: dict[str, str]) -> dict[str, Any]:
     assignees = sorted(dimensions["assignee_name"].dropna().unique().tolist())
     healths = sorted(dimensions["project_health"].dropna().unique().tolist())
     project_statuses = sorted(dimensions["project_status_name"].dropna().unique().tolist())
-    state_types = sorted(dimensions["state_type"].dropna().unique().tolist())
+    workflow_states = sorted(
+        dimensions["workflow_state"].dropna().unique().tolist(),
+        key=workflow_state_sort_key,
+    )
     priorities = sorted(dimensions["issue_priority_label"].dropna().unique().tolist())
     cycles = sorted(dimensions["cycle_name"].dropna().unique().tolist())
     labels = sorted(dimensions["label_name"].dropna().unique().tolist())
@@ -168,7 +183,7 @@ def render_global_filters(config: dict[str, str]) -> dict[str, Any]:
     default_snapshot_start = default_snapshot_end - timedelta(days=30)
 
     st.sidebar.header("Filters")
-    search_text = st.sidebar.text_input("Search issue/project/person")
+    search_text = st.sidebar.text_input("Search issue/project/person/state")
     selected_projects = st.sidebar.multiselect("Projects", projects)
     selected_teams = st.sidebar.multiselect("Teams", teams)
     selected_assignees = st.sidebar.multiselect("People", assignees)
@@ -178,7 +193,7 @@ def render_global_filters(config: dict[str, str]) -> dict[str, Any]:
         selected_project_statuses = st.multiselect("Project status", project_statuses)
 
     with st.sidebar.expander("Issue filters", expanded=True):
-        selected_state_types = st.multiselect("Issue state type", state_types)
+        selected_workflow_states = st.multiselect("Workflow state", workflow_states)
         selected_priorities = st.multiselect("Priority", priorities)
         selected_cycles = st.multiselect("Cycle", cycles)
         selected_labels = st.multiselect("Labels", labels)
@@ -207,7 +222,7 @@ def render_global_filters(config: dict[str, str]) -> dict[str, Any]:
         "assignees": selected_assignees,
         "healths": selected_healths,
         "project_statuses": selected_project_statuses,
-        "state_types": selected_state_types,
+        "workflow_states": selected_workflow_states,
         "priorities": selected_priorities,
         "cycles": selected_cycles,
         "labels": selected_labels,

@@ -17,6 +17,7 @@ from lib.ui import (
     safe_ratio,
     section_header,
     setup_page,
+    workflow_stack_bar,
 )
 
 
@@ -28,6 +29,9 @@ def render_team_kpis(teams) -> None:
     ]
     operating_ratio = safe_ratio(len(healthy_teams), len(active_teams))
     open_issues = int(teams["open_issues"].sum())
+    todo = int(teams["todo_issues"].sum())
+    in_process = int(teams["in_process_issues"].sum())
+    review = int(teams["review_issues"].sum())
     overdue = int(teams["overdue_issues"].sum())
     due_soon = int(teams["due_soon_issues"].sum())
     unassigned = int(teams["unassigned_open_issues"].sum())
@@ -54,9 +58,9 @@ def render_team_kpis(teams) -> None:
         card(
             "Open work",
             format_int(open_issues),
-            "Current active workload",
+            f"Todo {format_int(todo)}; In Process/Review {format_int(in_process + review)}",
             "info",
-            "Open = triage + backlog + unstarted + started.",
+            "Open uses Linear lifecycle type; chart below shows workflow states.",
         )
     with cols[3]:
         card(
@@ -92,18 +96,13 @@ def main() -> None:
 
     left, right = st.columns([1, 1])
     with left:
-        top = teams.head(25).sort_values("open_issues", ascending=True)
-        fig = px.bar(
-            top,
-            x="open_issues",
-            y="team_key",
-            orientation="h",
-            color="overdue_issues",
-            color_continuous_scale="Reds",
-            title="Open workload by team",
-            labels={"team_key": "Team", "open_issues": "Open issues", "overdue_issues": "Overdue"},
+        workflow_stack_bar(
+            teams,
+            "team_key",
+            "Workflow load by team",
+            limit=25,
+            height=500,
         )
-        st.plotly_chart(apply_chart_style(fig, height=500), width="stretch")
 
     with right:
         fig = px.scatter(
@@ -123,7 +122,7 @@ def main() -> None:
         )
         st.plotly_chart(apply_chart_style(fig, height=500), width="stretch")
 
-    section_header("Current team update table", "Team workload, project spread and overdue pressure.", config["current_table"])
+    section_header("Current team update table", "Team workflow load, project spread and overdue pressure.", config["current_table"])
     st.dataframe(teams, width="stretch", hide_index=True)
 
 

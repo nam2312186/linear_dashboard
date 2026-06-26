@@ -22,6 +22,7 @@ from lib.ui import (
     safe_ratio,
     section_header,
     setup_page,
+    workflow_stack_bar,
 )
 
 
@@ -36,6 +37,8 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
     stale_open = int(projects["stale_open_issues"].sum())
     risky_projects = int(projects["project_health"].str.lower().isin(RISKY_HEALTHS).sum())
     completed = int(projects["completed_issues"].sum())
+    todo = int(projects["todo_issues"].sum())
+    in_flow = int((projects["in_process_issues"] + projects["review_issues"]).sum())
     non_canceled = int((projects["total_issues"] - projects["canceled_issues"]).sum())
     completion = safe_ratio(completed, non_canceled)
     stable_projects = projects[
@@ -61,7 +64,7 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
             format_int(project_count),
             f"{format_int(open_issues)} open issues",
             "info",
-            "Projects shown and their open issues.",
+            f"Todo {format_int(todo)}; In Process/Review {format_int(in_flow)}.",
         )
     with cols[2]:
         card(
@@ -142,8 +145,11 @@ def render_project_table(projects: pd.DataFrame, current_table: str) -> None:
             "issue_completion_ratio",
             "total_issues",
             "open_issues",
-            "started_issues",
-            "completed_issues",
+            "backlog_issues",
+            "todo_issues",
+            "in_process_issues",
+            "review_issues",
+            "done_issues",
             "overdue_issues",
             "due_soon_issues",
             "unassigned_open_issues",
@@ -197,7 +203,17 @@ def render_timeline(timeline: pd.DataFrame) -> None:
         x_end="finish",
         y="project_name",
         color="project_health",
-        hover_data=["project_status_name", "project_progress", "open_issues", "overdue_issues"],
+        hover_data=[
+            "project_status_name",
+            "project_progress",
+            "open_issues",
+            "backlog_issues",
+            "todo_issues",
+            "in_process_issues",
+            "review_issues",
+            "done_issues",
+            "overdue_issues",
+        ],
         title="Project schedule",
         color_discrete_sequence=px.colors.qualitative.Safe,
     )
@@ -219,6 +235,8 @@ def main() -> None:
 
     render_project_kpis(projects)
     render_project_maps(projects)
+    section_header("Workflow mix by project", "Backlog, Todo, In Process, Review and Done per project.", config["current_table"])
+    workflow_stack_bar(projects, "project_name", "Workflow state mix by project", limit=20, height=460)
     render_project_table(projects, config["current_table"])
     render_timeline(load_project_timeline(config, filters))
 
