@@ -7,7 +7,14 @@ import pandas as pd
 import streamlit as st
 
 from lib.bq import params_json, run_query
-from lib.constants import OPEN_STATE_TYPES, WORKFLOW_STATE_ORDER
+from lib.constants import (
+    EXCLUDED_METRIC_ASSIGNEE_EMAILS,
+    EXCLUDED_METRIC_ASSIGNEE_NAMES,
+    OPEN_STATE_TYPES,
+    REPORTING_UNASSIGNED_ASSIGNEE_EMAILS,
+    UNASSIGNED_ASSIGNEE_NAME,
+    WORKFLOW_STATE_ORDER,
+)
 
 
 VIETNAM_TZ = timezone(timedelta(hours=7))
@@ -28,13 +35,72 @@ def sql_list(values: list[str] | tuple[str, ...]) -> str:
     return ", ".join(f"'{value}'" for value in values)
 
 
+def _assignee_column(column: str, alias: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}{column}"
+
+
+def reporting_unassigned_assignee_condition(alias: str = "") -> str:
+    if not REPORTING_UNASSIGNED_ASSIGNEE_EMAILS:
+        return "FALSE"
+    email_column = _assignee_column("assignee_email", alias)
+    emails = sql_list(REPORTING_UNASSIGNED_ASSIGNEE_EMAILS)
+    return f"LOWER(TRIM(COALESCE({email_column}, ''))) IN ({emails})"
+
+
+def reporting_assignee_name_expr(alias: str = "") -> str:
+    name_column = _assignee_column("assignee_name", alias)
+    return (
+        f"CASE WHEN {reporting_unassigned_assignee_condition(alias)} "
+        f"THEN '{UNASSIGNED_ASSIGNEE_NAME}' "
+        f"ELSE COALESCE({name_column}, '{UNASSIGNED_ASSIGNEE_NAME}') END"
+    )
+
+
+def reporting_assignee_id_expr(alias: str = "") -> str:
+    id_column = _assignee_column("assignee_id", alias)
+    return f"CASE WHEN {reporting_unassigned_assignee_condition(alias)} THEN NULL ELSE {id_column} END"
+
+
+def reporting_unassigned_condition(alias: str = "") -> str:
+    id_column = _assignee_column("assignee_id", alias)
+    return f"({id_column} IS NULL OR {reporting_unassigned_assignee_condition(alias)})"
+
+
+def excluded_assignee_condition(alias: str = "") -> str:
+    conditions = []
+    if EXCLUDED_METRIC_ASSIGNEE_EMAILS:
+        email_column = _assignee_column("assignee_email", alias)
+        conditions.append(
+            f"LOWER(TRIM(COALESCE({email_column}, ''))) "
+            f"IN ({sql_list(EXCLUDED_METRIC_ASSIGNEE_EMAILS)})"
+        )
+    if EXCLUDED_METRIC_ASSIGNEE_NAMES:
+        name_column = _assignee_column("assignee_name", alias)
+        display_name_column = _assignee_column("assignee_display_name", alias)
+        names = sql_list(EXCLUDED_METRIC_ASSIGNEE_NAMES)
+        conditions.extend(
+            [
+                f"LOWER(TRIM(COALESCE({name_column}, ''))) IN ({names})",
+                f"LOWER(TRIM(COALESCE({display_name_column}, ''))) IN ({names})",
+            ]
+        )
+    return " OR ".join(conditions) or "FALSE"
+
+
+def excluded_assignee_clause(alias: str = "") -> str:
+    return f"AND NOT ({excluded_assignee_condition(alias)})"
+
+
 def filter_clause(alias: str = "", due_reference_date: str = "CURRENT_DATE()") -> str:
     prefix = f"{alias}." if alias else ""
     open_state_types = sql_list(OPEN_STATE_TYPES)
+    reporting_assignee = reporting_assignee_name_expr(alias)
     return f"""
+      {excluded_assignee_clause(alias)}
       AND (@project_all OR COALESCE({prefix}project_name, '(blank)') IN UNNEST(@projects))
       AND (@team_all OR COALESCE({prefix}team_key, '(blank)') IN UNNEST(@teams))
-      AND (@assignee_all OR COALESCE({prefix}assignee_name, '(unassigned)') IN UNNEST(@assignees))
+      AND (@assignee_all OR {reporting_assignee} IN UNNEST(@assignees))
       AND (@health_all OR COALESCE({prefix}project_health, '(blank)') IN UNNEST(@healths))
       AND (@project_status_all OR COALESCE({prefix}project_status_name, '(blank)') IN UNNEST(@project_statuses))
       AND (@workflow_state_all OR COALESCE({prefix}state_name, '(blank)') IN UNNEST(@workflow_states))
@@ -66,7 +132,7 @@ def filter_clause(alias: str = "", due_reference_date: str = "CURRENT_DATE()") -
           COALESCE({prefix}issue_identifier, ''), ' ',
           COALESCE({prefix}issue_title, ''), ' ',
           COALESCE({prefix}project_name, ''), ' ',
-          COALESCE({prefix}assignee_name, ''), ' ',
+          COALESCE({reporting_assignee}, ''), ' ',
           COALESCE({prefix}team_key, ''), ' ',
           COALESCE({prefix}state_name, '')
         )) LIKE CONCAT('%', LOWER(@search_text), '%')
@@ -134,7 +200,7 @@ def load_dimensions(config: dict[str, str]) -> pd.DataFrame:
     SELECT DISTINCT
       COALESCE(project_name, '(blank)') AS project_name,
       COALESCE(team_key, '(blank)') AS team_key,
-      COALESCE(assignee_name, '(unassigned)') AS assignee_name,
+      {reporting_assignee_name_expr()} AS assignee_name,
       COALESCE(project_health, '(blank)') AS project_health,
       COALESCE(project_status_name, '(blank)') AS project_status_name,
       COALESCE(state_name, '(blank)') AS workflow_state,
@@ -143,6 +209,8 @@ def load_dimensions(config: dict[str, str]) -> pd.DataFrame:
       label_name
     FROM `{config["current_table"]}`
     LEFT JOIN UNNEST(IFNULL(issue_label_names, ARRAY<STRING>[])) AS label_name
+    WHERE TRUE
+    {excluded_assignee_clause()}
     """
     return run_query(sql, "{}", config["location"])
 
@@ -153,6 +221,8 @@ def load_last_sync(config: dict[str, str]) -> pd.DataFrame:
       MAX(synced_at) AS last_synced_at,
       COUNT(*) AS row_count
     FROM `{config["current_table"]}`
+    WHERE TRUE
+    {excluded_assignee_clause()}
     """
     return run_query(sql, "{}", config["location"])
 

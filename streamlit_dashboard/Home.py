@@ -69,9 +69,12 @@ def signed(value: float | None, suffix: str = "") -> str:
     return f"{sign}{value:,.0f}{suffix} vs range start"
 
 
-def risk_tone(value: int) -> str:
-    if value > 0:
+def risk_tone(value: int, danger_at: int = 10) -> str:
+    pressure = num(value)
+    if pressure >= danger_at:
         return "danger"
+    if pressure > 0:
+        return "warn"
     return "good"
 
 
@@ -131,7 +134,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             "Operating ratio",
             ratio_label(operating_ratio),
             operating_status,
-            status_tone if status_tone == "danger" else good_ratio_tone(operating_ratio),
+            good_ratio_tone(operating_ratio),
             "Open not overdue / open.",
         )
     with cols[1]:
@@ -163,7 +166,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             "Risk load",
             format_int(risky_projects),
             f"{format_int(high_priority)} high priority, {format_int(stale)} stale",
-            risk_tone(risky_projects),
+            risk_tone(risky_projects, danger_at=3),
             "Project health at risk/off track.",
         )
 

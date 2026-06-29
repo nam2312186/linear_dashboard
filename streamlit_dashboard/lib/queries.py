@@ -6,7 +6,14 @@ import pandas as pd
 
 from lib.bq import params_json, run_query
 from lib.constants import HIGH_PRIORITY_LABELS, OPEN_STATE_TYPES, WORKFLOW_STATE_BUCKETS
-from lib.filters import filter_clause, query_params, sql_list
+from lib.filters import (
+    filter_clause,
+    query_params,
+    reporting_assignee_id_expr,
+    reporting_assignee_name_expr,
+    reporting_unassigned_condition,
+    sql_list,
+)
 
 
 def workflow_state_condition(bucket: str, column: str = "state_name") -> str:
@@ -53,7 +60,7 @@ def load_kpis(config: dict[str, str], filters: dict[str, Any]) -> pd.DataFrame:
       COUNTIF(state_type = 'completed') AS completed_issues,
       COUNTIF(state_type = 'canceled') AS canceled_issues,
 {workflow_state_count_columns()}
-      COUNTIF(assignee_id IS NULL AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS unassigned_open_issues,
+      COUNTIF({reporting_unassigned_condition()} AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS unassigned_open_issues,
       COUNTIF(issue_due_date < CURRENT_DATE() AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
       COUNTIF(issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS due_soon_issues,
@@ -120,11 +127,11 @@ def load_project_rollup(config: dict[str, str], filters: dict[str, Any], limit: 
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
         COUNTIF(issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS due_soon_issues,
-        COUNTIF(assignee_id IS NULL
+        COUNTIF({reporting_unassigned_condition()}
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS unassigned_open_issues,
         COUNTIF(issue_updated_at < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS stale_open_issues,
-        COUNT(DISTINCT assignee_id) AS contributor_count,
+        COUNT(DISTINCT {reporting_assignee_id_expr()}) AS contributor_count,
         MAX(issue_updated_at) AS last_issue_updated_at
       FROM filtered
       GROUP BY project_id
@@ -163,10 +170,10 @@ def load_team_rollup(config: dict[str, str], filters: dict[str, Any]) -> pd.Data
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS overdue_issues,
       COUNTIF(issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS due_soon_issues,
-      COUNTIF(assignee_id IS NULL
+      COUNTIF({reporting_unassigned_condition()}
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS unassigned_open_issues,
       COUNT(DISTINCT project_id) AS project_count,
-      COUNT(DISTINCT assignee_id) AS contributor_count
+      COUNT(DISTINCT {reporting_assignee_id_expr()}) AS contributor_count
     FROM `{config["current_table"]}`
     WHERE TRUE
     {filter_clause()}
@@ -181,7 +188,7 @@ def load_people_rollup(config: dict[str, str], filters: dict[str, Any], limit: i
     params["limit"] = limit
     sql = f"""
     SELECT
-      COALESCE(assignee_name, '(unassigned)') AS assignee_name,
+      {reporting_assignee_name_expr()} AS assignee_name,
       COUNT(*) AS total_issues,
       COUNTIF(state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS open_issues,
       COUNTIF(state_type = 'completed') AS completed_issues,
@@ -234,7 +241,7 @@ def load_issue_queue(config: dict[str, str], filters: dict[str, Any], queue: str
       issue_title,
       project_name,
       team_key,
-      COALESCE(assignee_name, '(unassigned)') AS assignee_name,
+      {reporting_assignee_name_expr()} AS assignee_name,
       COALESCE(state_name, '(blank)') AS workflow_state,
       COALESCE(state_type, '(blank)') AS lifecycle_state_type,
       issue_priority_label,
@@ -377,7 +384,7 @@ def load_raw_issues(config: dict[str, str], filters: dict[str, Any], limit: int)
       team_key,
       COALESCE(state_name, '(blank)') AS workflow_state,
       COALESCE(state_type, '(blank)') AS lifecycle_state_type,
-      COALESCE(assignee_name, '(unassigned)') AS assignee_name,
+      {reporting_assignee_name_expr()} AS assignee_name,
       issue_priority_label,
       issue_due_date,
       issue_updated_at,

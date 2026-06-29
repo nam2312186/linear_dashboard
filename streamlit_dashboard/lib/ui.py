@@ -335,7 +335,7 @@ def ratio_label(value: float) -> str:
     return f"{value:.0%}"
 
 
-def good_ratio_tone(value: float, warn_at: float = 0.7, good_at: float = 0.85) -> str:
+def good_ratio_tone(value: float, warn_at: float = 0.85, good_at: float = 0.95) -> str:
     if value >= good_at:
         return "good"
     if value >= warn_at:
@@ -343,8 +343,13 @@ def good_ratio_tone(value: float, warn_at: float = 0.7, good_at: float = 0.85) -
     return "danger"
 
 
-def pressure_tone(value: Any) -> str:
-    return "danger" if num(value) > 0 else "good"
+def pressure_tone(value: Any, warn_at: float = 1, danger_at: float = 10) -> str:
+    pressure = num(value)
+    if pressure >= danger_at:
+        return "danger"
+    if pressure >= warn_at:
+        return "warn"
+    return "good"
 
 
 def help_icon(help_text: str | None) -> str:

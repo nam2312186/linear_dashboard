@@ -60,7 +60,7 @@ def render_trend_kpis(trend, events) -> None:
             "Open trend",
             format_int(open_issues),
             signed_int(open_delta),
-            "danger" if open_delta > 0 else "good",
+            pressure_tone(open_delta),
             "Latest open vs range start.",
         )
     with cols[2]:

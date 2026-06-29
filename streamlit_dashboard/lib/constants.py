@@ -5,6 +5,11 @@ OPEN_STATE_TYPES = ("triage", "backlog", "unstarted", "started")
 DONE_STATE_TYPES = ("completed", "canceled")
 HIGH_PRIORITY_LABELS = ("urgent", "high")
 
+UNASSIGNED_ASSIGNEE_NAME = "(unassigned)"
+EXCLUDED_METRIC_ASSIGNEE_EMAILS = ("developer@fanme.vn", "nguyenxuanvinhict@gmail.com")
+EXCLUDED_METRIC_ASSIGNEE_NAMES = ("nguyên",)
+REPORTING_UNASSIGNED_ASSIGNEE_EMAILS = ()
+
 WORKFLOW_STATE_BUCKETS = {
     "backlog": ("backlog",),
     "todo": ("todo", "to do"),
