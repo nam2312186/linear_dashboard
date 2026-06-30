@@ -4,7 +4,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.operation_groups import render_issue_operation_by_team
+from lib.operation_groups import filters_for_projects, open_overdue_ratio, operation_project_groups, operation_ratio_card
 from lib.queries import load_issue_queue, load_kpis, load_project_rollup, load_raw_issues, load_state_breakdown
 from lib.ui import (
     card,
@@ -21,7 +21,7 @@ from lib.ui import (
 )
 
 
-def render_issue_kpis(kpis) -> None:
+def render_issue_kpis(config, filters, kpis, projects) -> None:
     if kpis.empty:
         return
 
@@ -35,18 +35,24 @@ def render_issue_kpis(kpis) -> None:
     todo = int(row["todo_issues"] or 0)
     in_process = int(row["in_process_issues"] or 0)
     review = int(row["review_issues"] or 0)
-    on_time_ratio = safe_ratio(open_issues - overdue, open_issues)
 
-    cols = st.columns(5)
-    with cols[0]:
-        card(
-            "Operating ratio",
-            ratio_label(on_time_ratio),
-            f"{format_int(overdue)} overdue",
-            good_ratio_tone(on_time_ratio),
-            "Open not overdue / open.",
-        )
-    with cols[1]:
+    cols = st.columns(6)
+    for index, (team_name, _team_note, project_names) in enumerate(operation_project_groups(projects)):
+        has_scope = bool(project_names)
+        if has_scope:
+            team_kpis = load_kpis(config, filters_for_projects(filters, project_names))
+            team_row = team_kpis.iloc[0]
+            team_open = int(team_row["open_issues"] or 0)
+            team_overdue = int(team_row["overdue_issues"] or 0)
+            ratio = open_overdue_ratio(team_open, team_overdue)
+            note = f"{format_int(team_overdue)} overdue / {format_int(team_open)} open"
+        else:
+            ratio = 0
+            note = "No selected projects"
+        with cols[index]:
+            operation_ratio_card(team_name, ratio, note, "Open not overdue / open.", has_scope)
+
+    with cols[2]:
         card(
             "Open issues",
             format_int(open_issues),
@@ -54,7 +60,7 @@ def render_issue_kpis(kpis) -> None:
             "info",
             f"{format_int(unassigned)} unassigned open issues.",
         )
-    with cols[2]:
+    with cols[3]:
         card(
             "Due soon",
             format_int(due_soon),
@@ -62,7 +68,7 @@ def render_issue_kpis(kpis) -> None:
             notice_tone(due_soon),
             "Open issue due today through next 7 days.",
         )
-    with cols[3]:
+    with cols[4]:
         card(
             "Stale",
             format_int(stale),
@@ -70,7 +76,7 @@ def render_issue_kpis(kpis) -> None:
             pressure_tone(stale),
             "Open issue not updated for 14+ days.",
         )
-    with cols[4]:
+    with cols[5]:
         card(
             "High priority",
             format_int(high_priority),
@@ -98,8 +104,7 @@ def main() -> None:
     filters = render_global_filters(config)
     kpis = load_kpis(config, filters)
     projects = load_project_rollup(config, filters)
-    render_issue_kpis(kpis)
-    render_issue_operation_by_team(config, filters, projects, config["current_table"])
+    render_issue_kpis(config, filters, kpis, projects)
 
     section_header("Workflow state mix", "Current issue distribution by workflow state.", config["current_table"])
     state_bar(load_state_breakdown(config, filters), "Workflow state mix")

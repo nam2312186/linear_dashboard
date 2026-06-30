@@ -7,7 +7,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.operation_groups import render_project_operation_by_team
+from lib.operation_groups import grouped_project_open_overdue, operation_ratio_card
 from lib.queries import (
     load_completion_events,
     load_issue_queue,
@@ -93,7 +93,7 @@ def completion_tone(value: float) -> str:
     return "danger"
 
 
-def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
+def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame, projects: pd.DataFrame) -> None:
     if kpis.empty:
         st.info("No current data for the selected filters.")
         return
@@ -110,35 +110,16 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
     in_process = int_value(row, "in_process_issues")
     review = int_value(row, "review_issues")
     completion = completion_ratio(row)
-    operating_ratio = safe_ratio(int_value(row, "open_issues") - overdue, row["open_issues"])
-
-    if overdue or risky_projects:
-        operating_status = "Needs attention"
-        status_tone = "danger"
-        status_note = "Overdue work or risky projects need management follow-up"
-    elif stale or unassigned or high_priority:
-        operating_status = "Watch closely"
-        status_tone = "warn"
-        status_note = "Workload has ownership or freshness pressure"
-    else:
-        operating_status = "Stable"
-        status_tone = "good"
-        status_note = "No major operational pressure in the selected scope"
-
     section_header(
         "Operating cockpit",
         "Current state from the update table, with trend deltas from hourly snapshots.",
     )
-    cols = st.columns([1.25, 1, 1, 1, 1])
-    with cols[0]:
-        card(
-            "Operating ratio",
-            ratio_label(operating_ratio),
-            operating_status,
-            good_ratio_tone(operating_ratio),
-            "Open not overdue / open.",
-        )
-    with cols[1]:
+    cols = st.columns(6)
+    for index, (team_name, ratio, note, has_scope) in enumerate(grouped_project_open_overdue(projects)):
+        with cols[index]:
+            operation_ratio_card(team_name, ratio, note, "Open not overdue / open.", has_scope)
+
+    with cols[2]:
         card(
             "Open work",
             format_int(row["open_issues"]),
@@ -146,7 +127,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             "info",
             "Open uses Linear lifecycle type; workflow split: Backlog, Todo, In Process, Review.",
         )
-    with cols[2]:
+    with cols[3]:
         card(
             "Completion",
             format_progress(completion),
@@ -154,7 +135,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             completion_tone(completion),
             "Completed / (total - canceled).",
         )
-    with cols[3]:
+    with cols[4]:
         card(
             "Overdue",
             format_int(overdue),
@@ -162,7 +143,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             risk_tone(overdue),
             "Open issue có due date trước hôm nay.",
         )
-    with cols[4]:
+    with cols[5]:
         card(
             "Risk load",
             format_int(risky_projects),
@@ -510,8 +491,7 @@ def main() -> None:
         stale = load_issue_queue(config, filters, "stale", limit=100)
         high_priority = load_issue_queue(config, filters, "high_priority", limit=100)
 
-    render_operating_summary(kpis, trend)
-    render_project_operation_by_team(projects, config["current_table"])
+    render_operating_summary(kpis, trend, projects)
     render_snapshot_trend(trend, config["snapshot_table"])
     render_project_portfolio(projects, config["current_table"])
     render_attention_queues(config["current_table"], overdue, due_soon, stale, high_priority)

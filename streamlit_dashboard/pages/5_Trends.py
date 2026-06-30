@@ -5,7 +5,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.operation_groups import render_trend_operation_by_team
+from lib.operation_groups import filters_for_projects, open_overdue_ratio, operation_project_groups, operation_ratio_card
 from lib.queries import load_completion_events, load_project_rollup, load_snapshot_trend
 from lib.ui import (
     apply_chart_style,
@@ -34,13 +34,12 @@ def signed_int(value: float) -> str:
     return f"{sign}{value:,.0f} vs range start"
 
 
-def render_trend_kpis(trend, events) -> None:
+def render_trend_kpis(config, filters, trend, events, projects) -> None:
     ordered = trend.sort_values("snapshot_hour")
     first = ordered.iloc[0]
     latest = ordered.iloc[-1]
     open_issues = int(latest["open_issues"] or 0)
     overdue = int(latest["overdue_issues"] or 0)
-    on_time_ratio = safe_ratio(open_issues - overdue, open_issues)
     completion = latest["issue_completion_ratio"]
     open_delta = float(latest["open_issues"] - first["open_issues"])
     overdue_delta = float(latest["overdue_issues"] - first["overdue_issues"])
@@ -48,16 +47,28 @@ def render_trend_kpis(trend, events) -> None:
     completed_events = int(events["completed_events"].sum()) if not events.empty else 0
     canceled_events = int(events["canceled_events"].sum()) if not events.empty else 0
 
-    cols = st.columns(5)
-    with cols[0]:
-        card(
-            "Operating ratio",
-            ratio_label(on_time_ratio),
-            f"{format_int(overdue)} overdue now",
-            good_ratio_tone(on_time_ratio),
-            "Latest open not overdue / latest open.",
-        )
-    with cols[1]:
+    cols = st.columns(6)
+    for index, (team_name, _team_note, project_names) in enumerate(operation_project_groups(projects)):
+        has_scope = bool(project_names)
+        if has_scope:
+            team_trend = load_snapshot_trend(config, filters_for_projects(filters, project_names))
+            if team_trend.empty:
+                has_scope = False
+                ratio = 0
+                note = "No snapshot data"
+            else:
+                team_latest = team_trend.sort_values("snapshot_hour").iloc[-1]
+                team_open = int(team_latest["open_issues"] or 0)
+                team_overdue = int(team_latest["overdue_issues"] or 0)
+                ratio = open_overdue_ratio(team_open, team_overdue)
+                note = f"{format_int(team_overdue)} overdue now"
+        else:
+            ratio = 0
+            note = "No selected projects"
+        with cols[index]:
+            operation_ratio_card(team_name, ratio, note, "Latest open not overdue / latest open.", has_scope)
+
+    with cols[2]:
         card(
             "Open trend",
             format_int(open_issues),
@@ -65,7 +76,7 @@ def render_trend_kpis(trend, events) -> None:
             notice_tone(open_delta),
             "Latest open vs range start.",
         )
-    with cols[2]:
+    with cols[3]:
         card(
             "Completion",
             format_progress(completion),
@@ -73,7 +84,7 @@ def render_trend_kpis(trend, events) -> None:
             good_ratio_tone(safe_ratio(completion, 1), warn_at=0.45, good_at=0.7),
             "Completed / (total - canceled).",
         )
-    with cols[3]:
+    with cols[4]:
         card(
             "Overdue trend",
             format_int(overdue),
@@ -81,7 +92,7 @@ def render_trend_kpis(trend, events) -> None:
             pressure_tone(overdue),
             "Latest overdue vs range start.",
         )
-    with cols[4]:
+    with cols[5]:
         card(
             "Done events",
             format_int(done_events or completed_events),
@@ -107,8 +118,7 @@ def main() -> None:
         st.warning("No snapshot data in the selected history window.")
         return
 
-    render_trend_kpis(trend, events)
-    render_trend_operation_by_team(config, filters, projects, config["snapshot_table"])
+    render_trend_kpis(config, filters, trend, events, projects)
 
     chart_trend = trend.copy()
     chart_trend["avg_project_progress_ratio"] = chart_trend["avg_project_progress"].map(as_ratio)

@@ -8,7 +8,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.operation_groups import render_project_operation_by_team
+from lib.operation_groups import operation_ratio_card, split_project_rollup
 from lib.queries import load_project_rollup, load_project_timeline
 from lib.ui import (
     apply_chart_style,
@@ -43,24 +43,22 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
     in_flow = int((projects["in_process_issues"] + projects["review_issues"]).sum())
     non_canceled = int((projects["total_issues"] - projects["canceled_issues"]).sum())
     completion = safe_ratio(completed, non_canceled)
-    stable_projects = projects[
-        (projects["overdue_issues"] == 0)
-        & (projects["stale_open_issues"] == 0)
-        & (projects["unassigned_open_issues"] == 0)
-        & ~projects["project_health"].str.lower().isin(RISKY_HEALTHS)
-    ]
-    operating_ratio = safe_ratio(len(stable_projects), project_count)
 
-    cols = st.columns(5)
-    with cols[0]:
-        card(
-            "Operating ratio",
-            ratio_label(operating_ratio),
-            f"{format_int(len(stable_projects))}/{format_int(project_count)} stable projects",
-            good_ratio_tone(operating_ratio),
-            "Stable projects / total projects shown.",
-        )
-    with cols[1]:
+    cols = st.columns(6)
+    for index, (team_name, _team_note, team_projects) in enumerate(split_project_rollup(projects)):
+        has_scope = not team_projects.empty
+        stable_projects = team_projects[
+            (team_projects["overdue_issues"] == 0)
+            & (team_projects["stale_open_issues"] == 0)
+            & (team_projects["unassigned_open_issues"] == 0)
+            & ~team_projects["project_health"].str.lower().isin(RISKY_HEALTHS)
+        ] if has_scope else team_projects
+        ratio = safe_ratio(len(stable_projects), len(team_projects)) if has_scope else 0
+        note = f"{format_int(len(stable_projects))}/{format_int(len(team_projects))} stable projects"
+        with cols[index]:
+            operation_ratio_card(team_name, ratio, note, "Stable projects / total projects shown.", has_scope)
+
+    with cols[2]:
         card(
             "Project load",
             format_int(project_count),
@@ -68,7 +66,7 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
             "info",
             f"Todo {format_int(todo)}; In Process/Review {format_int(in_flow)}.",
         )
-    with cols[2]:
+    with cols[3]:
         card(
             "Issue completion",
             format_progress(completion),
@@ -76,7 +74,7 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
             good_ratio_tone(completion, warn_at=0.45, good_at=0.7),
             "Completed / (total - canceled).",
         )
-    with cols[3]:
+    with cols[4]:
         card(
             "Deadline pressure",
             format_int(overdue_issues),
@@ -84,7 +82,7 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
             pressure_tone(overdue_issues) if overdue_issues else notice_tone(risky_projects),
             "Overdue open issues; risky projects are shown as notice when there is no overdue work.",
         )
-    with cols[4]:
+    with cols[5]:
         card(
             "Ownership gap",
             format_int(unassigned_open),
@@ -236,7 +234,6 @@ def main() -> None:
         return
 
     render_project_kpis(projects)
-    render_project_operation_by_team(projects, config["current_table"])
     render_project_maps(projects)
     section_header("Workflow mix by project", "Backlog, Todo, In Process, Review and Done per project.", config["current_table"])
     workflow_stack_bar(projects, "project_name", "Workflow state mix by project", limit=20, height=460)

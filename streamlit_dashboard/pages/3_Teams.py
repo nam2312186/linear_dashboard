@@ -5,7 +5,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.operation_groups import render_team_operation_by_team
+from lib.operation_groups import filters_for_projects, operation_project_groups, operation_ratio_card
 from lib.queries import load_project_rollup, load_team_rollup
 from lib.ui import (
     apply_chart_style,
@@ -23,13 +23,7 @@ from lib.ui import (
 )
 
 
-def render_team_kpis(teams) -> None:
-    active_teams = teams[teams["open_issues"] > 0]
-    healthy_teams = active_teams[
-        (active_teams["overdue_issues"] == 0)
-        & (active_teams["unassigned_open_issues"] == 0)
-    ]
-    operating_ratio = safe_ratio(len(healthy_teams), len(active_teams))
+def render_team_kpis(config, filters, teams, projects) -> None:
     open_issues = int(teams["open_issues"].sum())
     todo = int(teams["todo_issues"].sum())
     in_process = int(teams["in_process_issues"].sum())
@@ -37,26 +31,35 @@ def render_team_kpis(teams) -> None:
     overdue = int(teams["overdue_issues"].sum())
     due_soon = int(teams["due_soon_issues"].sum())
     unassigned = int(teams["unassigned_open_issues"].sum())
-    projects = int(teams["project_count"].sum())
+    projects_total = int(teams["project_count"].sum())
 
-    cols = st.columns(5)
-    with cols[0]:
-        card(
-            "Operating ratio",
-            ratio_label(operating_ratio),
-            f"{format_int(len(healthy_teams))}/{format_int(len(active_teams))} active teams clear",
-            good_ratio_tone(operating_ratio),
-            "Clear active teams / active teams.",
-        )
-    with cols[1]:
+    cols = st.columns(6)
+    for index, (team_name, _team_note, project_names) in enumerate(operation_project_groups(projects)):
+        has_scope = bool(project_names)
+        if has_scope:
+            team_rows = load_team_rollup(config, filters_for_projects(filters, project_names))
+            active_teams = team_rows[team_rows["open_issues"] > 0]
+            healthy_teams = active_teams[
+                (active_teams["overdue_issues"] == 0)
+                & (active_teams["unassigned_open_issues"] == 0)
+            ]
+            ratio = 1 if len(active_teams) == 0 else safe_ratio(len(healthy_teams), len(active_teams))
+            note = f"{format_int(len(healthy_teams))}/{format_int(len(active_teams))} active teams clear"
+        else:
+            ratio = 0
+            note = "No selected projects"
+        with cols[index]:
+            operation_ratio_card(team_name, ratio, note, "Clear active teams / active teams.", has_scope)
+
+    with cols[2]:
         card(
             "Teams",
             format_int(len(teams)),
-            f"{format_int(projects)} project links",
+            f"{format_int(projects_total)} project links",
             "info",
             "Teams after filters; project links may duplicate.",
         )
-    with cols[2]:
+    with cols[3]:
         card(
             "Open work",
             format_int(open_issues),
@@ -64,7 +67,7 @@ def render_team_kpis(teams) -> None:
             "info",
             "Open uses Linear lifecycle type; chart below shows workflow states.",
         )
-    with cols[3]:
+    with cols[4]:
         card(
             "Deadline pressure",
             format_int(overdue),
@@ -72,7 +75,7 @@ def render_team_kpis(teams) -> None:
             pressure_tone(overdue),
             "Overdue open; due soon is next 7 days.",
         )
-    with cols[4]:
+    with cols[5]:
         card(
             "Ownership gap",
             format_int(unassigned),
@@ -95,8 +98,7 @@ def main() -> None:
         st.info("No team data for the selected filters.")
         return
 
-    render_team_kpis(teams)
-    render_team_operation_by_team(config, filters, projects, config["current_table"])
+    render_team_kpis(config, filters, teams, projects)
 
     left, right = st.columns([1, 1])
     with left:
