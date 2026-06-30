@@ -5,24 +5,20 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.operation_groups import filters_for_projects, operation_project_groups, operation_ratio_card
-from lib.queries import load_issue_queue, load_people_rollup, load_project_rollup
+from lib.queries import load_issue_queue, load_people_rollup
 from lib.ui import (
     apply_chart_style,
     card,
     format_int,
-    good_ratio_tone,
     page_header,
     pressure_tone,
-    ratio_label,
-    safe_ratio,
     section_header,
     setup_page,
     workflow_stack_bar,
 )
 
 
-def render_people_kpis(config, filters, people, projects) -> None:
+def render_people_kpis(people) -> None:
     open_issues = int(people["open_issues"].sum())
     todo = int(people["todo_issues"].sum())
     in_process = int(people["in_process_issues"].sum())
@@ -31,40 +27,18 @@ def render_people_kpis(config, filters, people, projects) -> None:
     overdue_people = int((people["overdue_issues"] > 0).sum())
     high_priority = int(people["high_priority_open_issues"].sum())
     stale = int(people["stale_open_issues"].sum())
+    active_people = int((people["open_issues"] > 0).sum())
 
-    cols = st.columns(6)
-    for index, (team_name, _team_note, project_names) in enumerate(operation_project_groups(projects)):
-        has_scope = bool(project_names)
-        if has_scope:
-            team_people = load_people_rollup(config, filters_for_projects(filters, project_names))
-            active_people = team_people[team_people["open_issues"] > 0]
-            healthy_people = active_people[
-                (active_people["overdue_issues"] == 0)
-                & (active_people["stale_open_issues"] == 0)
-            ]
-            ratio = 1 if len(active_people) == 0 else safe_ratio(len(healthy_people), len(active_people))
-            note = f"{format_int(len(healthy_people))}/{format_int(len(active_people))} active people clear"
-        else:
-            ratio = 0
-            note = "No selected projects"
-        with cols[index]:
-            operation_ratio_card(
-                team_name,
-                ratio,
-                note,
-                "Active people without overdue or stale open issues / active people.",
-                has_scope,
-            )
-
-    with cols[2]:
+    cols = st.columns(4)
+    with cols[0]:
         card(
             "People",
             format_int(len(people)),
-            f"{format_int((people['open_issues'] > 0).sum())} with open work",
+            f"{format_int(active_people)} with open work",
             "info",
             "Assignees after current filters.",
         )
-    with cols[3]:
+    with cols[1]:
         card(
             "Open load",
             format_int(open_issues),
@@ -72,7 +46,7 @@ def render_people_kpis(config, filters, people, projects) -> None:
             "info",
             f"Todo {format_int(todo)}; open uses Linear lifecycle type.",
         )
-    with cols[4]:
+    with cols[2]:
         card(
             "Overdue pressure",
             format_int(overdue),
@@ -80,7 +54,7 @@ def render_people_kpis(config, filters, people, projects) -> None:
             pressure_tone(overdue),
             "Open issue due date before today.",
         )
-    with cols[5]:
+    with cols[3]:
         card(
             "Stale open",
             format_int(stale),
@@ -154,13 +128,12 @@ def main() -> None:
 
     filters = render_global_filters(config)
     people = load_people_rollup(config, filters)
-    projects = load_project_rollup(config, filters)
 
     if people.empty:
         st.info("No people data for the selected filters.")
         return
 
-    render_people_kpis(config, filters, people, projects)
+    render_people_kpis(people)
 
     render_people_charts(people)
 
