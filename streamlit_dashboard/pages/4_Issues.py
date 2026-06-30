@@ -4,11 +4,13 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.queries import load_issue_queue, load_kpis, load_raw_issues, load_state_breakdown
+from lib.operation_groups import render_issue_operation_by_team
+from lib.queries import load_issue_queue, load_kpis, load_project_rollup, load_raw_issues, load_state_breakdown
 from lib.ui import (
     card,
     format_int,
     good_ratio_tone,
+    notice_tone,
     page_header,
     pressure_tone,
     ratio_label,
@@ -57,7 +59,7 @@ def render_issue_kpis(kpis) -> None:
             "Due soon",
             format_int(due_soon),
             "Next 7 days",
-            pressure_tone(due_soon),
+            notice_tone(due_soon),
             "Open issue due today through next 7 days.",
         )
     with cols[3]:
@@ -73,7 +75,7 @@ def render_issue_kpis(kpis) -> None:
             "High priority",
             format_int(high_priority),
             "Urgent/high open",
-            pressure_tone(high_priority),
+            notice_tone(high_priority),
             "Open issue priority urgent or high.",
         )
 
@@ -95,7 +97,9 @@ def main() -> None:
 
     filters = render_global_filters(config)
     kpis = load_kpis(config, filters)
+    projects = load_project_rollup(config, filters)
     render_issue_kpis(kpis)
+    render_issue_operation_by_team(config, filters, projects, config["current_table"])
 
     section_header("Workflow state mix", "Current issue distribution by workflow state.", config["current_table"])
     state_bar(load_state_breakdown(config, filters), "Workflow state mix")

@@ -352,6 +352,10 @@ def pressure_tone(value: Any, warn_at: float = 1, danger_at: float = 10) -> str:
     return "good"
 
 
+def notice_tone(value: Any) -> str:
+    return "warn" if num(value) > 0 else "good"
+
+
 def help_icon(help_text: str | None) -> str:
     if not help_text:
         return ""

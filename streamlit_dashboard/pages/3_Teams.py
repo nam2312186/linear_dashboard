@@ -5,12 +5,14 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.queries import load_team_rollup
+from lib.operation_groups import render_team_operation_by_team
+from lib.queries import load_project_rollup, load_team_rollup
 from lib.ui import (
     apply_chart_style,
     card,
     format_int,
     good_ratio_tone,
+    notice_tone,
     page_header,
     pressure_tone,
     ratio_label,
@@ -75,7 +77,7 @@ def render_team_kpis(teams) -> None:
             "Ownership gap",
             format_int(unassigned),
             "Unassigned open issues",
-            pressure_tone(unassigned),
+            notice_tone(unassigned),
             "Open issues without assignee.",
         )
 
@@ -87,12 +89,14 @@ def main() -> None:
 
     filters = render_global_filters(config)
     teams = load_team_rollup(config, filters)
+    projects = load_project_rollup(config, filters)
 
     if teams.empty:
         st.info("No team data for the selected filters.")
         return
 
     render_team_kpis(teams)
+    render_team_operation_by_team(config, filters, projects, config["current_table"])
 
     left, right = st.columns([1, 1])
     with left:

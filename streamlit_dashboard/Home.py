@@ -7,6 +7,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
+from lib.operation_groups import render_project_operation_by_team
 from lib.queries import (
     load_completion_events,
     load_issue_queue,
@@ -166,8 +167,8 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame) -> None:
             "Risk load",
             format_int(risky_projects),
             f"{format_int(high_priority)} high priority, {format_int(stale)} stale",
-            risk_tone(risky_projects, danger_at=3),
-            "Project health at risk/off track.",
+            watch_tone(risky_projects + high_priority + stale),
+            "Project health at risk/off track; high priority and stale are shown as notice signals.",
         )
 
     a, b, c, d = st.columns(4)
@@ -510,6 +511,7 @@ def main() -> None:
         high_priority = load_issue_queue(config, filters, "high_priority", limit=100)
 
     render_operating_summary(kpis, trend)
+    render_project_operation_by_team(projects, config["current_table"])
     render_snapshot_trend(trend, config["snapshot_table"])
     render_project_portfolio(projects, config["current_table"])
     render_attention_queues(config["current_table"], overdue, due_soon, stale, high_priority)

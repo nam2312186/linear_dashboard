@@ -5,7 +5,8 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.queries import load_issue_queue, load_people_rollup
+from lib.operation_groups import render_people_operation_by_team
+from lib.queries import load_issue_queue, load_people_rollup, load_project_rollup
 from lib.ui import (
     apply_chart_style,
     card,
@@ -26,7 +27,6 @@ def render_people_kpis(people) -> None:
     healthy_people = active_people[
         (active_people["overdue_issues"] == 0)
         & (active_people["stale_open_issues"] == 0)
-        & (active_people["high_priority_open_issues"] == 0)
     ]
     operating_ratio = safe_ratio(len(healthy_people), len(active_people))
     open_issues = int(people["open_issues"].sum())
@@ -45,7 +45,7 @@ def render_people_kpis(people) -> None:
             ratio_label(operating_ratio),
             f"{format_int(len(healthy_people))}/{format_int(len(active_people))} active people clear",
             good_ratio_tone(operating_ratio),
-            "Clear active people / active people.",
+            "Active people without overdue or stale open issues / active people.",
         )
     with cols[1]:
         card(
@@ -73,11 +73,11 @@ def render_people_kpis(people) -> None:
         )
     with cols[4]:
         card(
-            "Priority & stale",
-            format_int(high_priority),
-            f"{format_int(stale)} stale open",
-            pressure_tone(high_priority + stale),
-            "Urgent/high open + stale open.",
+            "Stale open",
+            format_int(stale),
+            f"{format_int(high_priority)} high priority open",
+            pressure_tone(stale),
+            "Open issue not updated for 14+ days.",
         )
 
 
@@ -94,21 +94,47 @@ def render_people_charts(people):
         )
 
     with right:
-        risk = people.sort_values(["overdue_issues", "high_priority_open_issues"], ascending=True).tail(25)
+        follow_up = people.copy()
+        follow_up["follow_up_load"] = (
+            follow_up["overdue_issues"].fillna(0) + follow_up["stale_open_issues"].fillna(0)
+        )
+        follow_up = follow_up[follow_up["follow_up_load"] > 0]
+        if follow_up.empty:
+            st.info("No overdue or stale open issues for the selected filters.")
+            return
+
+        follow_up = follow_up.sort_values("follow_up_load", ascending=False).head(25)
+        entity_order = follow_up.sort_values("follow_up_load")["assignee_name"].tolist()
+        chart = follow_up.melt(
+            id_vars=["assignee_name", "high_priority_open_issues", "open_issues"],
+            value_vars=["overdue_issues", "stale_open_issues"],
+            var_name="follow_up_type",
+            value_name="issue_count",
+        )
+        chart = chart[chart["issue_count"].fillna(0) > 0]
+        chart["follow_up_type"] = chart["follow_up_type"].map(
+            {"overdue_issues": "Overdue", "stale_open_issues": "Stale >14 days"}
+        )
+
         fig = px.bar(
-            risk,
-            x="overdue_issues",
+            chart,
+            x="issue_count",
             y="assignee_name",
             orientation="h",
-            color="high_priority_open_issues",
-            color_continuous_scale="Reds",
-            title="Overdue and high-priority load",
+            color="follow_up_type",
+            title="Stale and overdue follow-up",
+            category_orders={"assignee_name": entity_order},
+            hover_data=["open_issues", "high_priority_open_issues"],
             labels={
                 "assignee_name": "Person",
-                "overdue_issues": "Overdue",
+                "issue_count": "Issues",
+                "follow_up_type": "Follow-up type",
+                "open_issues": "Open",
                 "high_priority_open_issues": "High priority",
             },
+            color_discrete_map={"Overdue": "#b91c1c", "Stale >14 days": "#b45309"},
         )
+        fig.update_layout(barmode="stack")
         st.plotly_chart(apply_chart_style(fig, height=500), width="stretch")
 
 
@@ -119,12 +145,14 @@ def main() -> None:
 
     filters = render_global_filters(config)
     people = load_people_rollup(config, filters)
+    projects = load_project_rollup(config, filters)
 
     if people.empty:
         st.info("No people data for the selected filters.")
         return
 
     render_people_kpis(people)
+    render_people_operation_by_team(config, filters, projects, config["current_table"])
 
     render_people_charts(people)
 

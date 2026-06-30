@@ -9,6 +9,8 @@ UNASSIGNED_ASSIGNEE_NAME = "(unassigned)"
 EXCLUDED_METRIC_ASSIGNEE_EMAILS = ("developer@fanme.vn", "nguyenxuanvinhict@gmail.com")
 EXCLUDED_METRIC_ASSIGNEE_NAMES = ("nguyên",)
 REPORTING_UNASSIGNED_ASSIGNEE_EMAILS = ()
+EXCLUDED_PROJECT_NAMES = ("test extract data",)
+DEV_OPERATION_PROJECT_NAMES = ("fanme app", "fanme web")
 
 WORKFLOW_STATE_BUCKETS = {
     "backlog": ("backlog",),

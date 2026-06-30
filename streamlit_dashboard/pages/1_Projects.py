@@ -8,6 +8,7 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
+from lib.operation_groups import render_project_operation_by_team
 from lib.queries import load_project_rollup, load_project_timeline
 from lib.ui import (
     apply_chart_style,
@@ -15,6 +16,7 @@ from lib.ui import (
     format_int,
     format_progress,
     good_ratio_tone,
+    notice_tone,
     page_header,
     pressure_tone,
     progress_points,
@@ -79,16 +81,16 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
             "Deadline pressure",
             format_int(overdue_issues),
             f"{format_int(risky_projects)} risky projects",
-            pressure_tone(overdue_issues + risky_projects),
-            "Overdue open issues + risky projects.",
+            pressure_tone(overdue_issues) if overdue_issues else notice_tone(risky_projects),
+            "Overdue open issues; risky projects are shown as notice when there is no overdue work.",
         )
     with cols[4]:
         card(
             "Ownership gap",
             format_int(unassigned_open),
             f"{format_int(stale_open)} stale open",
-            pressure_tone(unassigned_open + stale_open),
-            "Unassigned open + stale open.",
+            pressure_tone(stale_open) if stale_open else notice_tone(unassigned_open),
+            "Stale open drives warning; unassigned open is shown as notice.",
         )
 
 
@@ -234,6 +236,7 @@ def main() -> None:
         return
 
     render_project_kpis(projects)
+    render_project_operation_by_team(projects, config["current_table"])
     render_project_maps(projects)
     section_header("Workflow mix by project", "Backlog, Todo, In Process, Review and Done per project.", config["current_table"])
     workflow_stack_bar(projects, "project_name", "Workflow state mix by project", limit=20, height=460)

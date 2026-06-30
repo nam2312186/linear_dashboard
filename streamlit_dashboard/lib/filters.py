@@ -10,6 +10,7 @@ from lib.bq import params_json, run_query
 from lib.constants import (
     EXCLUDED_METRIC_ASSIGNEE_EMAILS,
     EXCLUDED_METRIC_ASSIGNEE_NAMES,
+    EXCLUDED_PROJECT_NAMES,
     OPEN_STATE_TYPES,
     REPORTING_UNASSIGNED_ASSIGNEE_EMAILS,
     UNASSIGNED_ASSIGNEE_NAME,
@@ -92,12 +93,32 @@ def excluded_assignee_clause(alias: str = "") -> str:
     return f"AND NOT ({excluded_assignee_condition(alias)})"
 
 
+def _project_column(column: str, alias: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}{column}"
+
+
+def excluded_project_condition(alias: str = "") -> str:
+    if not EXCLUDED_PROJECT_NAMES:
+        return "FALSE"
+    project_name_column = _project_column("project_name", alias)
+    return (
+        f"LOWER(TRIM(COALESCE({project_name_column}, ''))) "
+        f"IN ({sql_list(EXCLUDED_PROJECT_NAMES)})"
+    )
+
+
+def excluded_project_clause(alias: str = "") -> str:
+    return f"AND NOT ({excluded_project_condition(alias)})"
+
+
 def filter_clause(alias: str = "", due_reference_date: str = "CURRENT_DATE()") -> str:
     prefix = f"{alias}." if alias else ""
     open_state_types = sql_list(OPEN_STATE_TYPES)
     reporting_assignee = reporting_assignee_name_expr(alias)
     return f"""
       {excluded_assignee_clause(alias)}
+      {excluded_project_clause(alias)}
       AND (@project_all OR COALESCE({prefix}project_name, '(blank)') IN UNNEST(@projects))
       AND (@team_all OR COALESCE({prefix}team_key, '(blank)') IN UNNEST(@teams))
       AND (@assignee_all OR {reporting_assignee} IN UNNEST(@assignees))
@@ -211,6 +232,7 @@ def load_dimensions(config: dict[str, str]) -> pd.DataFrame:
     LEFT JOIN UNNEST(IFNULL(issue_label_names, ARRAY<STRING>[])) AS label_name
     WHERE TRUE
     {excluded_assignee_clause()}
+    {excluded_project_clause()}
     """
     return run_query(sql, "{}", config["location"])
 
@@ -223,6 +245,7 @@ def load_last_sync(config: dict[str, str]) -> pd.DataFrame:
     FROM `{config["current_table"]}`
     WHERE TRUE
     {excluded_assignee_clause()}
+    {excluded_project_clause()}
     """
     return run_query(sql, "{}", config["location"])
 

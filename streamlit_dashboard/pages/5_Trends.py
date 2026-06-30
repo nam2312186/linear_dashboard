@@ -5,13 +5,15 @@ import streamlit as st
 
 from lib.bq import load_config
 from lib.filters import render_global_filters
-from lib.queries import load_completion_events, load_snapshot_trend
+from lib.operation_groups import render_trend_operation_by_team
+from lib.queries import load_completion_events, load_project_rollup, load_snapshot_trend
 from lib.ui import (
     apply_chart_style,
     card,
     format_int,
     format_progress,
     good_ratio_tone,
+    notice_tone,
     page_header,
     pressure_tone,
     progress_points,
@@ -60,7 +62,7 @@ def render_trend_kpis(trend, events) -> None:
             "Open trend",
             format_int(open_issues),
             signed_int(open_delta),
-            pressure_tone(open_delta),
+            notice_tone(open_delta),
             "Latest open vs range start.",
         )
     with cols[2]:
@@ -97,6 +99,7 @@ def main() -> None:
     filters = render_global_filters(config)
     trend = load_snapshot_trend(config, filters)
     events = load_completion_events(config, filters)
+    projects = load_project_rollup(config, filters)
 
     section_header("Snapshot trend table", "Hourly operating movement from the snapshot table.", config["snapshot_table"])
 
@@ -105,6 +108,7 @@ def main() -> None:
         return
 
     render_trend_kpis(trend, events)
+    render_trend_operation_by_team(config, filters, projects, config["snapshot_table"])
 
     chart_trend = trend.copy()
     chart_trend["avg_project_progress_ratio"] = chart_trend["avg_project_progress"].map(as_ratio)
