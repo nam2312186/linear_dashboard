@@ -72,9 +72,9 @@ def render_issue_kpis(config, filters, kpis, projects) -> None:
         card(
             "Stale",
             format_int(stale),
-            ">14 days no update",
+            ">1 month no update",
             pressure_tone(stale),
-            "Open issue not updated for 14+ days.",
+            "Open issue not updated for 1+ month.",
         )
     with cols[5]:
         card(

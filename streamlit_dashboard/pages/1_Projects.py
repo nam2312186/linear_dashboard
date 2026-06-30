@@ -47,16 +47,11 @@ def render_project_kpis(projects: pd.DataFrame) -> None:
     cols = st.columns(6)
     for index, (team_name, _team_note, team_projects) in enumerate(split_project_rollup(projects)):
         has_scope = not team_projects.empty
-        stable_projects = team_projects[
-            (team_projects["overdue_issues"] == 0)
-            & (team_projects["stale_open_issues"] == 0)
-            & (team_projects["unassigned_open_issues"] == 0)
-            & ~team_projects["project_health"].str.lower().isin(RISKY_HEALTHS)
-        ] if has_scope else team_projects
+        stable_projects = team_projects[team_projects["overdue_issues"] == 0] if has_scope else team_projects
         ratio = safe_ratio(len(stable_projects), len(team_projects)) if has_scope else 0
         note = f"{format_int(len(stable_projects))}/{format_int(len(team_projects))} stable projects"
         with cols[index]:
-            operation_ratio_card(team_name, ratio, note, "Stable projects / total projects shown.", has_scope)
+            operation_ratio_card(team_name, ratio, note, "Projects without overdue open issues / total projects shown.", has_scope)
 
     with cols[2]:
         card(

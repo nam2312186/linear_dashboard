@@ -165,7 +165,7 @@ def render_operating_summary(kpis: pd.DataFrame, trend: pd.DataFrame, projects: 
             "Stale open",
             format_int(stale),
             watch_tone(stale),
-            "Open issue hơn 14 ngày chưa update.",
+            "Open issue hơn 1 tháng chưa update.",
         )
     with c:
         alert_tile(

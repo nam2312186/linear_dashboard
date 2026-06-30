@@ -66,7 +66,7 @@ def load_kpis(config: dict[str, str], filters: dict[str, Any]) -> pd.DataFrame:
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS due_soon_issues,
       COUNTIF(LOWER(issue_priority_label) IN ({sql_list(HIGH_PRIORITY_LABELS)})
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS high_priority_open_issues,
-      COUNTIF(issue_updated_at < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
+      COUNTIF(issue_updated_at < TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 1 MONTH))
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS stale_open_issues,
       (SELECT COUNT(*) FROM projects) AS total_projects,
       (SELECT COUNTIF(LOWER(COALESCE(project_health, '')) IN ('atrisk', 'at risk', 'offtrack', 'off track')) FROM projects) AS risky_projects,
@@ -129,7 +129,7 @@ def load_project_rollup(config: dict[str, str], filters: dict[str, Any], limit: 
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS due_soon_issues,
         COUNTIF({reporting_unassigned_condition()}
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS unassigned_open_issues,
-        COUNTIF(issue_updated_at < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
+        COUNTIF(issue_updated_at < TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 1 MONTH))
                 AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS stale_open_issues,
         COUNT(DISTINCT {reporting_assignee_id_expr()}) AS contributor_count,
         MAX(issue_updated_at) AS last_issue_updated_at
@@ -200,7 +200,7 @@ def load_people_rollup(config: dict[str, str], filters: dict[str, Any], limit: i
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS due_soon_issues,
       COUNTIF(LOWER(issue_priority_label) IN ({sql_list(HIGH_PRIORITY_LABELS)})
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS high_priority_open_issues,
-      COUNTIF(issue_updated_at < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
+      COUNTIF(issue_updated_at < TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 1 MONTH))
               AND state_type IN ({sql_list(OPEN_STATE_TYPES)})) AS stale_open_issues,
       COUNT(DISTINCT project_id) AS project_count,
       COUNT(DISTINCT team_key) AS team_count,
@@ -221,7 +221,7 @@ def load_issue_queue(config: dict[str, str], filters: dict[str, Any], queue: str
     where_by_queue = {
         "overdue": f"issue_due_date < CURRENT_DATE() AND state_type IN ({sql_list(OPEN_STATE_TYPES)})",
         "due_soon": f"issue_due_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY) AND state_type IN ({sql_list(OPEN_STATE_TYPES)})",
-        "stale": f"issue_updated_at < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY) AND state_type IN ({sql_list(OPEN_STATE_TYPES)})",
+        "stale": f"issue_updated_at < TIMESTAMP(DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 1 MONTH)) AND state_type IN ({sql_list(OPEN_STATE_TYPES)})",
         "high_priority": f"LOWER(issue_priority_label) IN ({sql_list(HIGH_PRIORITY_LABELS)}) AND state_type IN ({sql_list(OPEN_STATE_TYPES)})",
         "open": f"state_type IN ({sql_list(OPEN_STATE_TYPES)})",
     }

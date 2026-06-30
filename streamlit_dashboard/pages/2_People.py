@@ -86,7 +86,7 @@ def render_people_kpis(config, filters, people, projects) -> None:
             format_int(stale),
             f"{format_int(high_priority)} high priority open",
             pressure_tone(stale),
-            "Open issue not updated for 14+ days.",
+            "Open issue not updated for 1+ month.",
         )
 
 
@@ -122,7 +122,7 @@ def render_people_charts(people):
         )
         chart = chart[chart["issue_count"].fillna(0) > 0]
         chart["follow_up_type"] = chart["follow_up_type"].map(
-            {"overdue_issues": "Overdue", "stale_open_issues": "Stale >14 days"}
+            {"overdue_issues": "Overdue", "stale_open_issues": "Stale >1 month"}
         )
 
         fig = px.bar(
@@ -141,7 +141,7 @@ def render_people_charts(people):
                 "open_issues": "Open",
                 "high_priority_open_issues": "High priority",
             },
-            color_discrete_map={"Overdue": "#b91c1c", "Stale >14 days": "#b45309"},
+            color_discrete_map={"Overdue": "#b91c1c", "Stale >1 month": "#b45309"},
         )
         fig.update_layout(barmode="stack")
         st.plotly_chart(apply_chart_style(fig, height=500), width="stretch")
